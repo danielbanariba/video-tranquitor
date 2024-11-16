@@ -1,13 +1,19 @@
 import speech_recognition as sr
 import moviepy.editor as mp
 from pydub import AudioSegment
-import math
 import os
 import json
 
 def extract_audio_from_video(video_path, audio_path):
-    video = mp.VideoFileClip(video_path)
-    video.audio.write_audiofile(audio_path)
+    try:
+        video = mp.VideoFileClip(video_path)
+        video.audio.write_audiofile(audio_path)
+    except KeyError as e:
+        print(f"Error al extraer audio del video: {e}")
+        raise
+    except Exception as e:
+        print(f"Error inesperado al extraer audio del video: {e}")
+        raise
 
 def convert_audio_format(input_audio_path, output_audio_path):
     audio = AudioSegment.from_file(input_audio_path)
@@ -53,7 +59,7 @@ def save_text_to_file(text, output_path):
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(text, f, ensure_ascii=False, indent=4)
 
-def main(video_path):
+def main(file_path, is_video=True):
     temp_audio_path = "temp_audio.mp3"
     temp_wav_path = "temp_audio.wav"
     output_text_path = "output/transcription.json"
@@ -61,14 +67,24 @@ def main(video_path):
     if not os.path.exists("output"):
         os.makedirs("output")
 
-    extract_audio_from_video(video_path, temp_audio_path)
-    convert_audio_format(temp_audio_path, temp_wav_path)
-    text = transcribe_audio_to_text(temp_wav_path)
-    save_text_to_file(text, output_text_path)
+    try:
+        if is_video:
+            extract_audio_from_video(file_path, temp_audio_path)
+            convert_audio_format(temp_audio_path, temp_wav_path)
+        else:
+            convert_audio_format(file_path, temp_wav_path)
 
-    os.remove(temp_audio_path)
-    os.remove(temp_wav_path)
+        text = transcribe_audio_to_text(temp_wav_path)
+        save_text_to_file(text, output_text_path)
+    except Exception as e:
+        print(f"Error durante el procesamiento: {e}")
+    finally:
+        if is_video and os.path.exists(temp_audio_path):
+            os.remove(temp_audio_path)
+        if os.path.exists(temp_wav_path):
+            os.remove(temp_wav_path)
 
 if __name__ == "__main__":
-    video_path = "C:/Users/banar/Videos/2024-10-09 08-17-47.mkv"
-    main(video_path)
+    file_path = "C:/Users/banar/Videos/xd.ogg"
+    is_video = False  # Cambia esto a False si quieres analizar un archivo de audio directamente
+    main(file_path, is_video)
