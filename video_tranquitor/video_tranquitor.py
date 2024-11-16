@@ -16,6 +16,25 @@ class State(rx.State):
     progress: int = 0
     uploading: bool = False
     has_transcription: bool = False
+    json_url: str = ""
+    text_url: str = ""
+    
+    def create_download_urls(self):
+        """Crea las URLs de descarga."""
+        if not self.has_transcription:
+            self.json_url = ""
+            self.text_url = ""
+            return
+            
+        # Crear URL para JSON
+        json_content = json.dumps(self.transcription, ensure_ascii=False, indent=2)
+        self.json_url = f"data:application/json;charset=utf-8,{json_content}"
+        
+        # Crear URL para texto
+        text_content = ""
+        for segment in self.transcription:
+            text_content += f"[{segment['inicio']} - {segment['fin']}]\n{segment['texto']}\n\n"
+        self.text_url = f"data:text/plain;charset=utf-8,{text_content}"
     
     async def handle_upload(self, files: list[rx.UploadFile]):
         """Maneja la subida de archivos."""
@@ -53,6 +72,8 @@ class State(rx.State):
         self.error = ""
         self.transcription = []
         self.has_transcription = False
+        self.json_url = ""
+        self.text_url = ""
         
         temp_audio_path = None
         temp_wav_path = None
@@ -71,6 +92,7 @@ class State(rx.State):
             result = transcribe_audio_to_text(temp_wav_path)
             self.transcription = result
             self.has_transcription = True
+            self.create_download_urls()
             
         except Exception as e:
             self.error = f"Error durante el procesamiento: {str(e)}"
@@ -175,26 +197,47 @@ def index():
             ),
             rx.cond(
                 State.has_transcription,
-                rx.box(
-                    rx.heading("Transcripción:", size="md", margin_top="4"),
-                    rx.vstack(
-                        rx.foreach(
-                            State.transcription,
-                            lambda segment: rx.box(
-                                rx.hstack(
-                                    rx.text(f"{segment['inicio']} - {segment['fin']}", font_weight="bold"),
-                                    rx.text(segment["texto"]),
-                                ),
-                                padding="2",
-                                border="1px solid",
-                                border_color="gray.200",
-                                border_radius="md",
-                                margin_y="1",
-                                width="100%",
+                rx.vstack(
+                    rx.hstack(
+                        rx.link(
+                            rx.button(
+                                "Descargar JSON",
+                                color_scheme="green",
                             ),
+                            href=State.json_url,
+                            download="transcripcion.json",
                         ),
-                        align_items="stretch",
-                        width="100%",
+                        rx.link(
+                            rx.button(
+                                "Descargar TXT",
+                                color_scheme="blue",
+                            ),
+                            href=State.text_url,
+                            download="transcripcion.txt",
+                        ),
+                        spacing="4",
+                    ),
+                    rx.box(
+                        rx.heading("Transcripción:", size="md", margin_top="4"),
+                        rx.vstack(
+                            rx.foreach(
+                                State.transcription,
+                                lambda segment: rx.box(
+                                    rx.hstack(
+                                        rx.text(f"{segment['inicio']} - {segment['fin']}", font_weight="bold"),
+                                        rx.text(segment["texto"]),
+                                    ),
+                                    padding="2",
+                                    border="1px solid",
+                                    border_color="gray.200",
+                                    border_radius="md",
+                                    margin_y="1",
+                                    width="100%",
+                                ),
+                            ),
+                            align_items="stretch",
+                            width="100%",
+                        ),
                     ),
                 ),
             ),
