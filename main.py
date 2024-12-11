@@ -84,7 +84,12 @@ def main(file_path, is_video=True):
         if os.path.exists(temp_wav_path):
             os.remove(temp_wav_path)
 
+
 if __name__ == "__main__":
-    file_path = "C:/Users/banar/Videos/xd.ogg"
-    is_video = False  # Cambia esto a False si quieres analizar un archivo de audio directamente
-    main(file_path, is_video)
+    folder_path = "./Audios"
+    is_video = False  # Cambia esto a False si quieres analizar archivos de audio directamente
+
+    for filename in os.listdir(folder_path):
+        if filename.endswith(('.ogg', '.mp3', '.wav')):
+            file_path = os.path.join(folder_path, filename)
+            main(file_path, is_video)

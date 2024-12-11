@@ -7,3 +7,8 @@ env
 __init__.py
 *.log
 favicon.ico
+uploads/
+temp
+temp_*/
+Audios
+Output
