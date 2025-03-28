@@ -92,7 +92,7 @@ if __name__ == "__main__":
     is_video = False
 
     for filename in os.listdir(folder_path):
-        if filename.endswith(('.ogg', '.mp3', '.wav')):
+        if filename.endswith(('.ogg', '.mp3', '.wav', ".mkv", ".mp4")):
             file_path = os.path.join(folder_path, filename)
             print(f"Procesando archivo: {filename}")
             main(file_path, is_video)
