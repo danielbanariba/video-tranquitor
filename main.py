@@ -121,7 +121,6 @@ def transcribe_long_audio(audio_path, language="es", chunk_length_sec=120):
                 "inicio": format_time(start_time),
                 "fin": format_time(end_time),
                 "texto": text,
-                "transcripcion_original": True  # Marcamos que es un segmento original
             })
         
         # Eliminar archivo temporal
@@ -215,7 +214,6 @@ def divide_segments_in_smaller_chunks(transcriptions, small_chunk_seconds=10):
                 "inicio": format_time(small_start),
                 "fin": format_time(small_end),
                 "texto": segment_text,
-                "transcripcion_original": False  # Marcamos que es un segmento dividido
             })
     
     return small_segments
