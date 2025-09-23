@@ -1,308 +1,301 @@
-import speech_recognition as sr
-import moviepy.editor as mp
-from pydub import AudioSegment
 import os
 import json
 import time
 from tqdm import tqdm
 from dotenv import load_dotenv
 from openai import OpenAI
+import moviepy.editor as mp
+from pydub import AudioSegment
+from pydub.silence import detect_nonsilent
 
-# Cargar variables de entorno desde el archivo .env
 load_dotenv()
-
-# Inicializar el cliente de OpenAI con la API key desde variables de entorno
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def extract_audio_from_video(video_path, audio_path):
     try:
         video = mp.VideoFileClip(video_path)
         video.audio.write_audiofile(audio_path, verbose=False, logger=None)
-        return True
-    except KeyError as e:
-        print(f"Error al extraer audio del video: {e}")
-        return False
-    except Exception as e:
-        print(f"Error inesperado al extraer audio del video: {e}")
-        return False
-
-def convert_audio_format(input_audio_path, output_audio_path):
-    try:
-        audio = AudioSegment.from_file(input_audio_path)
-        audio.export(output_audio_path, format="wav")
+        video.close()
         return True
     except Exception as e:
-        print(f"Error al convertir formato de audio: {e}")
+        print(f"Error: {e}")
         return False
 
-def get_audio_duration(audio_path):
-    """Obtener la duración del audio en segundos"""
-    audio = AudioSegment.from_file(audio_path)
-    return len(audio) / 1000  # Convertir de ms a segundos
-
-def get_file_size_mb(file_path):
-    """Obtener el tamaño del archivo en MB"""
-    size_bytes = os.path.getsize(file_path)
-    size_mb = size_bytes / (1024 * 1024)
-    return size_mb
-
-def transcribe_with_openai(audio_path, language="es"):
-    """Transcribe audio usando la API de OpenAI Whisper (nueva sintaxis)"""
+def convert_audio_format(input_path, output_path):
     try:
-        # Verificar tamaño del archivo
-        file_size = get_file_size_mb(audio_path)
-        if file_size > 24:  # Si es mayor a 24 MB, es probable que falle
-            print(f"Advertencia: El archivo es de {file_size:.2f} MB, lo cual puede exceder el límite de la API")
-        
-        with open(audio_path, "rb") as audio_file:
-            # Nueva sintaxis para OpenAI >= 1.0.0
-            response = client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file,
-                language=language,
-                response_format="json"
-            )
-        
-        # Procesamos la respuesta
-        text = ""
-        if hasattr(response, 'text'):
-            text = response.text.strip()
-        else:
-            text = str(response).strip()
-            
-        # Devolvemos el texto plano en lugar de un segmento formateado
-        return text
+        audio = AudioSegment.from_file(input_path)
+        # Normalizar audio para mejor transcripción
+        target_dBFS = -20.0
+        change_in_dBFS = target_dBFS - audio.dBFS
+        normalized = audio.apply_gain(change_in_dBFS)
+        normalized.export(output_path, format="wav", parameters=["-ar", "16000", "-ac", "1"])
+        return True
     except Exception as e:
-        print(f"Error en la transcripción con OpenAI: {e}")
-        return ""
+        print(f"Error: {e}")
+        return False
 
-def format_time(seconds):
-    """Formatea segundos a formato HH:MM:SS"""
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    seconds = int(seconds % 60)
-    return f"{hours:02}:{minutes:02}:{seconds:02}"
-
-def transcribe_long_audio(audio_path, language="es", chunk_length_sec=120):
-    """Transcribe audios largos dividiéndolos en segmentos de 2 minutos para mejor procesamiento"""
+def transcribe_smart(audio_path, language="es"):
+    """Transcribe en segmentos de 10-20 segundos sin detección de hablantes"""
     audio = AudioSegment.from_file(audio_path)
     duration_ms = len(audio)
-    chunk_length_ms = chunk_length_sec * 1000
     
-    transcriptions = []  # Lista de diccionarios con tiempo de inicio, fin y texto
+    # Detectar pausas para mejor segmentación
+    nonsilent_ranges = detect_nonsilent(audio, min_silence_len=300, silence_thresh=-40)
     
-    # Crear directorio temporal si no existe
-    if not os.path.exists("temp_chunks"):
-        os.makedirs("temp_chunks")
+    segments = []
+    os.makedirs("temp_chunks", exist_ok=True)
     
-    total_chunks = (duration_ms // chunk_length_ms) + 1
-    
-    for i in tqdm(range(0, duration_ms, chunk_length_ms), desc="Procesando audio", total=total_chunks):
-        # Obtener segmento de audio
-        chunk = audio[i:i + chunk_length_ms]
-        chunk_filename = f"temp_chunks/chunk_{i}.mp3"
+    # Calcular chunks de 10-20 segundos
+    chunks_to_process = []
+    i = 0
+    while i < len(nonsilent_ranges):
+        start = nonsilent_ranges[i][0]
+        end = nonsilent_ranges[i][1]
         
-        # Exportar con calidad media para equilibrar tamaño y calidad
-        chunk.export(chunk_filename, format="mp3", parameters=["-q:a", "6"])
-        
-        # Verificar tamaño del archivo
-        file_size = get_file_size_mb(chunk_filename)
-        
-        # Transcribir segmento
-        print(f"Transcribiendo segmento {i//chunk_length_ms + 1}/{total_chunks} (Tamaño: {file_size:.2f} MB)")
-        text = transcribe_with_openai(chunk_filename, language)
-        
-        # Almacenar la transcripción con su tiempo de inicio y fin
-        if text:
-            start_time = i / 1000  # Convertir ms a segundos
-            end_time = min((i + len(chunk)) / 1000, duration_ms / 1000)
+        # Agrupar hasta 10-20 segundos
+        while i + 1 < len(nonsilent_ranges):
+            next_end = nonsilent_ranges[i + 1][1]
+            duration_sec = (next_end - start) / 1000
             
-            transcriptions.append({
-                "inicio": format_time(start_time),
-                "fin": format_time(end_time),
-                "texto": text,
-            })
+            if duration_sec <= 10:
+                end = next_end
+                i += 1
+            elif duration_sec <= 20:
+                silence_gap = nonsilent_ranges[i + 1][0] - nonsilent_ranges[i][1]
+                if silence_gap > 500:
+                    break
+                end = next_end
+                i += 1
+            else:
+                break
         
-        # Eliminar archivo temporal
-        os.remove(chunk_filename)
-        
-        # Dormir un poco para no sobrecargar la API
-        time.sleep(1)
+        chunks_to_process.append((start, end))
+        i += 1
     
-    # Limpiar directorio temporal
-    if os.path.exists("temp_chunks"):
+    # Procesar con barra de progreso
+    for start, end in tqdm(chunks_to_process, desc="Procesando audio", unit="segmento"):
+        chunk = audio[start:end]
+        chunk_file = f"temp_chunks/chunk_{start}.wav"
+        chunk.export(chunk_file, format="wav", parameters=["-ar", "16000", "-ac", "1"])
+        
+        file_size = os.path.getsize(chunk_file) / (1024 * 1024)
+        print(f"Transcribiendo segmento {len(segments) + 1}/{len(chunks_to_process)} (Tamaño: {file_size:.2f} MB)")
+        
         try:
-            os.rmdir("temp_chunks")
-        except:
-            pass
+            with open(chunk_file, "rb") as f:
+                response = client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=f,
+                    language=language,
+                    response_format="verbose_json"
+                )
             
-    return transcriptions
-
-def divide_segments_in_smaller_chunks(transcriptions, small_chunk_seconds=10):
-    """Divide las transcripciones en segmentos más pequeños (10 segundos) para mejor procesamiento por IA"""
-    small_segments = []
-    
-    for segment in transcriptions:
-        # Convertir inicio y fin a segundos
-        start_parts = segment["inicio"].split(":")
-        start_seconds = int(start_parts[0]) * 3600 + int(start_parts[1]) * 60 + int(start_parts[2])
-        
-        end_parts = segment["fin"].split(":")
-        end_seconds = int(end_parts[0]) * 3600 + int(end_parts[1]) * 60 + int(end_parts[2])
-        
-        # Calcular duración
-        duration = end_seconds - start_seconds
-        
-        # Si la duración es menor a nuestro chunk pequeño, mantenerlo igual
-        if duration <= small_chunk_seconds:
-            small_segments.append(segment)
-            continue
-        
-        # Dividir texto (aproximadamente) basado en la longitud y los espacios
-        texto = segment["texto"]
-        
-        # Número de segmentos pequeños que necesitamos
-        num_small_chunks = duration // small_chunk_seconds
-        if duration % small_chunk_seconds > 0:
-            num_small_chunks += 1
-        
-        # Intentamos dividir el texto basado en palabras y puntuación
-        # Primero separamos por puntos (oraciones)
-        sentences = []
-        current_sentence = ""
-        for char in texto:
-            current_sentence += char
-            if char in '.!?':
-                sentences.append(current_sentence.strip())
-                current_sentence = ""
-        
-        if current_sentence:  # Si queda alguna oración final sin punto
-            sentences.append(current_sentence.strip())
-        
-        # Si no hay oraciones (raro), o hay muy pocas, dividimos por espacios
-        if len(sentences) < num_small_chunks / 2:
-            words = texto.split()
-            approx_words_per_chunk = max(1, len(words) // num_small_chunks)
+            text = response.text.strip() if hasattr(response, 'text') else str(response).strip()
             
-            sentences = []
-            for i in range(0, len(words), approx_words_per_chunk):
-                word_group = words[i:i + approx_words_per_chunk]
-                sentences.append(" ".join(word_group))
+            if text:  # Solo agregar si hay texto
+                segments.append({
+                    "inicio": format_time(start / 1000),
+                    "fin": format_time(end / 1000),
+                    "texto": text
+                })
+            
+        except Exception as e:
+            print(f"Error en segmento: {e}")
         
-        # Ahora distribuimos estas oraciones en los segmentos pequeños
-        for i in range(int(num_small_chunks)):
-            small_start = start_seconds + (i * small_chunk_seconds)
-            small_end = min(small_start + small_chunk_seconds, end_seconds)
-            
-            # Calculamos qué oraciones corresponden a este segmento pequeño
-            segment_ratio = (small_end - small_start) / duration
-            sentence_start_idx = int((i / num_small_chunks) * len(sentences))
-            sentence_end_idx = int(((i + 1) / num_small_chunks) * len(sentences))
-            
-            # Asegurar que obtenemos al menos una oración
-            if sentence_start_idx == sentence_end_idx and sentence_start_idx < len(sentences):
-                sentence_end_idx = sentence_start_idx + 1
-            
-            # Obtener las oraciones para este segmento pequeño
-            segment_text = " ".join(sentences[sentence_start_idx:sentence_end_idx]).strip()
-            
-            # Si no hay texto (posible en silencios), ponemos una marca
-            if not segment_text:
-                segment_text = "[silencio o ruido de fondo]"
-            
-            small_segments.append({
-                "inicio": format_time(small_start),
-                "fin": format_time(small_end),
-                "texto": segment_text,
-            })
-    
-    return small_segments
-
-def save_text_to_file(text, output_path):
-    """Guarda la transcripción en un archivo JSON"""
-    with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(text, f, ensure_ascii=False, indent=4)
-
-def main(file_path, is_video=True, language="es"):
-    # Verificar que la API key está configurada
-    if not os.getenv("OPENAI_API_KEY"):
-        print("Error: No se ha configurado la API key de OpenAI en el archivo .env")
-        print("Por favor, crea un archivo .env con el siguiente contenido:")
-        print("OPENAI_API_KEY=tu_api_key_aquí")
-        return False
-    
-    # Obtenemos el nombre del archivo sin la extensión para usarlo en el archivo de salida
-    base_name = os.path.splitext(os.path.basename(file_path))[0]
-    temp_audio_path = f"temp_{base_name}.mp3"
-    temp_wav_path = f"temp_{base_name}.wav"
-    
-    # Usamos el nombre del archivo original para el archivo de salida
-    output_text_path = f"output/{base_name}_transcription.json"
-    output_detailed_path = f"output/{base_name}_detailed_transcription.json" # Para los segmentos pequeños
-    
-    if not os.path.exists("output"):
-        os.makedirs("output")
+        os.remove(chunk_file)
+        time.sleep(0.5)  # Rate limiting
     
     try:
-        print(f"Procesando archivo: {base_name}")
+        os.rmdir("temp_chunks")
+    except:
+        pass
+    
+    return segments
+
+def format_time(seconds):
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = seconds % 60
+    return f"{hours:02d}:{minutes:02d}:{secs:05.2f}"
+
+def save_outputs(segments, base_name, duration):
+    os.makedirs("output", exist_ok=True)
+    
+    # JSON simple para Claude
+    output = {
+        "archivo": base_name,
+        "duracion": format_time(duration),
+        "fecha": time.strftime("%Y-%m-%d %H:%M"),
+        "total_segmentos": len(segments),
+        "segmentos": segments
+    }
+    
+    json_path = f"output/{base_name}_claude.json"
+    with open(json_path, 'w', encoding='utf-8') as f:
+        json.dump(output, f, ensure_ascii=False, indent=2)
+    
+    # Texto simple con timestamps
+    txt_path = f"output/{base_name}_transcripcion.txt"
+    with open(txt_path, 'w', encoding='utf-8') as f:
+        f.write(f"TRANSCRIPCIÓN: {base_name}\n")
+        f.write(f"Fecha: {time.strftime('%Y-%m-%d %H:%M')}\n")
+        f.write(f"Duración: {format_time(duration)}\n")
+        f.write("=" * 80 + "\n\n")
         
-        # Extraer audio si es un video
+        for seg in segments:
+            f.write(f"[{seg['inicio']}] {seg['texto']}\n\n")
+    
+    print(f"\n✅ Archivos guardados:")
+    print(f"   • {json_path}")
+    print(f"   • {txt_path}")
+    
+    return json_path, txt_path
+
+def generate_claude_prompt(json_path):
+    """Genera el prompt perfecto para Claude"""
+    with open(json_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    # Crear el prompt completo
+    prompt = f"""Analiza esta transcripción de una reunión de trabajo:
+
+{json.dumps(data, ensure_ascii=False, indent=2)}
+
+Por favor proporciona un análisis COMPLETO y DETALLADO que incluya:
+
+## 📊 RESUMEN EJECUTIVO
+- Resume en 3-4 líneas lo más importante de la reunión
+
+## 🎯 TEMAS PRINCIPALES DISCUTIDOS
+- Lista y explica cada tema tratado con detalle
+
+## ✅ TAREAS ASIGNADAS
+IMPORTANTE: Identifica CLARAMENTE quién debe hacer qué. Busca nombres mencionados (Daniel, Carlos, etc.) y qué se les asignó específicamente.
+- [Persona] → [Tarea específica] → [Deadline si se mencionó]
+
+## 🔧 DECISIONES TÉCNICAS
+- Qué se decidió implementar
+- Cómo se va a estructurar (tablas, endpoints, formularios)
+- Tecnologías o herramientas mencionadas
+
+## ⚠️ PUNTOS CRÍTICOS
+- Problemas o preocupaciones mencionadas
+- Riesgos identificados
+- Cosas que no quedaron claras
+
+## 💡 RECOMENDACIONES PARA HACER EL TRABAJO CORRECTAMENTE
+
+Basándome en lo discutido, estas son las mejores prácticas para completar el trabajo exitosamente y evitar problemas:
+
+### Para el desarrollo:
+1. ¿Qué debería hacer PRIMERO?
+2. ¿Qué estructura de código/base de datos es la más apropiada?
+3. ¿Qué validaciones son CRÍTICAS que no debo olvidar?
+4. ¿Qué errores comunes debo evitar?
+
+### Para la gestión:
+1. ¿Cómo debería comunicar mi progreso?
+2. ¿Qué preguntas debería hacer ANTES de empezar?
+3. ¿Qué documentación debería preparar?
+
+## 🚨 ALERTAS IMPORTANTES
+Si detectas alguna señal de preocupación sobre el desempeño de alguien, o críticas hacia el trabajo, por favor indícalo claramente aquí.
+
+## 📅 PRÓXIMOS PASOS
+- Qué se debe entregar primero
+- Cuándo es la próxima reunión o revisión
+- Qué debe estar listo para entonces
+
+---
+NOTA: Si identificas que alguien fue criticado o hay presión sobre algún tema, por favor sé MUY ESPECÍFICO sobre qué se espera para evitar problemas."""
+    
+    return prompt
+
+def main(file_path, is_video=True, language="es"):
+    base_name = os.path.splitext(os.path.basename(file_path))[0]
+    temp_audio = f"temp_{base_name}.mp3"
+    temp_wav = f"temp_{base_name}.wav"
+    
+    try:
+        print(f"\n🎬 Procesando: {base_name}")
+        
         if is_video:
-            print("Extrayendo audio del video...")
-            if not extract_audio_from_video(file_path, temp_audio_path):
+            print("📹 Extrayendo audio del video...")
+            if not extract_audio_from_video(file_path, temp_audio):
                 return False
-            print("Convirtiendo formato de audio...")
-            if not convert_audio_format(temp_audio_path, temp_wav_path):
+            if not convert_audio_format(temp_audio, temp_wav):
                 return False
         else:
-            print("Convirtiendo formato de audio...")
-            if not convert_audio_format(file_path, temp_wav_path):
+            print("🎵 Convirtiendo formato de audio...")
+            if not convert_audio_format(file_path, temp_wav):
                 return False
         
-        # Obtener duración del audio
-        duration = get_audio_duration(temp_wav_path)
-        print(f"Duración total del audio: {format_time(duration)}")
+        audio = AudioSegment.from_file(temp_wav)
+        duration = len(audio) / 1000
         
-        # Transcribir en segmentos de 2 minutos para obtener mejor calidad
-        print(f"Transcribiendo audio en segmentos de 2 minutos...")
-        transcriptions = transcribe_long_audio(temp_wav_path, language, chunk_length_sec=120)
+        print(f"⏱️ Duración: {format_time(duration)}")
+        print("🎯 Transcribiendo audio...")
         
-        # Guardar la transcripción original (segmentos de 2 minutos)
-        save_text_to_file(transcriptions, output_text_path)
-        print(f"Transcripción completada para: {base_name}")
-        print(f"Archivo guardado en: {output_text_path}")
+        segments = transcribe_smart(temp_wav, language)
         
-        # Dividir en segmentos más pequeños de 10 segundos para la IA
-        print("Dividiendo transcripción en segmentos de 10 segundos para mejor procesamiento...")
-        small_segments = divide_segments_in_smaller_chunks(transcriptions, small_chunk_seconds=10)
+        print(f"\n📊 Resumen:")
+        print(f"  • Total segmentos: {len(segments)}")
+        print(f"  • Duración: {format_time(duration)}")
         
-        # Guardar la transcripción detallada (segmentos de 10 segundos)
-        save_text_to_file(small_segments, output_detailed_path)
-        print(f"Transcripción detallada guardada en: {output_detailed_path}\n")
+        json_path, txt_path = save_outputs(segments, base_name, duration)
+        
+        # Generar prompt para Claude
+        print("\n" + "="*80)
+        print("📝 PROMPT PARA CLAUDE (copia todo desde aquí):")
+        print("="*80)
+        
+        prompt = generate_claude_prompt(json_path)
+        print(prompt)
+        
+        print("\n" + "="*80)
+        print("☝️ COPIA TODO EL PROMPT ANTERIOR Y PÉGALO EN CLAUDE")
+        print("="*80)
+        
+        # Guardar prompt en archivo
+        prompt_path = f"output/{base_name}_prompt_claude.txt"
+        with open(prompt_path, 'w', encoding='utf-8') as f:
+            f.write(prompt)
+        print(f"\n💾 Prompt también guardado en: {prompt_path}")
         
         return True
         
     except Exception as e:
-        print(f"Error durante el procesamiento de {base_name}: {e}")
+        print(f"❌ Error: {e}")
         return False
     finally:
         # Limpieza de archivos temporales
-        if is_video and os.path.exists(temp_audio_path):
-            os.remove(temp_audio_path)
-        if os.path.exists(temp_wav_path):
-            os.remove(temp_wav_path)
+        for temp in [temp_audio, temp_wav]:
+            if os.path.exists(temp):
+                os.remove(temp)
 
 if __name__ == "__main__":
     folder_path = "./Audios"
-    language = "es"  # Idioma español por defecto
+    language = "es"  # Cambiar a "en" para inglés
     
-    # Detectar automáticamente si los archivos son video o audio
+    # Verificar API key
+    if not os.getenv("OPENAI_API_KEY"):
+        print("❌ Error: Falta OPENAI_API_KEY en archivo .env")
+        print("Crea un archivo .env con: OPENAI_API_KEY=tu_api_key")
+        exit(1)
+    
+    # Procesar archivos
+    video_extensions = ('.mp4', '.mkv', '.avi', '.mov', '.webm')
+    audio_extensions = ('.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac')
+    
+    files_found = False
     for filename in os.listdir(folder_path):
-        if filename.endswith(('.mp4', '.mkv', '.avi', '.mov')):
-            # Es un video
-            file_path = os.path.join(folder_path, filename)
-            main(file_path, is_video=True, language=language)
-        elif filename.endswith(('.ogg', '.mp3', '.wav', '.m4a', '.flac')):
-            # Es un audio
-            file_path = os.path.join(folder_path, filename)
-            main(file_path, is_video=False, language=language)
+        if filename.lower().endswith(video_extensions):
+            files_found = True
+            main(os.path.join(folder_path, filename), is_video=True, language=language)
+        elif filename.lower().endswith(audio_extensions):
+            files_found = True
+            main(os.path.join(folder_path, filename), is_video=False, language=language)
+    
+    if not files_found:
+        print(f"\n⚠️ No se encontraron archivos en {folder_path}")
+        print(f"   Formatos soportados: {video_extensions + audio_extensions}")
