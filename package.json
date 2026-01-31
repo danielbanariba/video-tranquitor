@@ -1,0 +1,31 @@
+{
+  "name": "video-tranquitor",
+  "version": "1.0.0",
+  "description": "",
+  "main": "src/main.ts",
+  "scripts": {
+    "start": "tsx src/main.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/danielbanariba/video-tranquitor.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/danielbanariba/video-tranquitor/issues"
+  },
+  "homepage": "https://github.com/danielbanariba/video-tranquitor#readme",
+  "dependencies": {
+    "@toon-format/toon": "^2.0.1",
+    "dotenv": "^17.2.3",
+    "openai": "^6.10.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

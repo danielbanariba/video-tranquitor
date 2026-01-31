@@ -13,3 +13,8 @@ temp_*/
 Audios
 Output
 .env
+node_modules/
+*.py[cod]
+*.py[co]
+*.cpython-*-*.so
+*.so
