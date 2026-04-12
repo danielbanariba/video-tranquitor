@@ -21,3 +21,14 @@ node_modules/
 vendor/
 venv/
 output/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+build/
+dist/
+*.egg-info/
+
+# Legacy TS dependencies (keep .legacy-ts itself tracked for reference)
+.legacy-ts/node_modules/
