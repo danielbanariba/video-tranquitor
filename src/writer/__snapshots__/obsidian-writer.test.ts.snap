@@ -1,0 +1,39 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`writeObsidianNote > generates markdown with all 5 required YAML frontmatter fields 1`] = `
+"---
+tags: [reunion, transcripcion]
+fecha: 2026-04-12
+estado: completado
+duracion: "00:20:00"
+participantes: ["SPEAKER_00", "SPEAKER_01"]
+---
+
+# Reunión 2026-04-12 - reunion_semanal
+
+
+## Transcripción
+
+**SPEAKER_00** (00:00:10): Buenos dias a todos
+
+**SPEAKER_01** (00:00:14): Hola como estan
+
+
+## Resumen
+
+Resumen de la reunion.
+
+## Requerimientos
+
+- [ ] **REQ-001** (alta): Login con OAuth
+
+## Accionables
+
+- [ ] **Ana**: Configurar CI/CD — 2026-04-15
+
+## Decisiones
+
+- Migrar a PostgreSQL
+- Adoptar TypeScript estricto
+"
+`;

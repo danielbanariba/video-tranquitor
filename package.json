@@ -2,10 +2,12 @@
   "name": "video-tranquitor",
   "version": "1.0.0",
   "description": "",
-  "main": "src/main.ts",
+  "main": "src/cli.ts",
   "scripts": {
     "start": "tsx src/cli.ts --watch",
-    "process": "tsx src/cli.ts"
+    "process": "tsx src/cli.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "repository": {
     "type": "git",
@@ -27,7 +29,9 @@
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
+    "@vitest/coverage-v8": "^4.1.4",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.4"
   }
 }

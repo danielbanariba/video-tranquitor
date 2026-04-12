@@ -1,7 +1,8 @@
 export interface PipelineConfig {
   watchDir: string;
   outputDir: string;
-  transcriber: "local" | "openai";
+  transcriber: "local" | "openai" | "whisperx" | "ensemble";
+  whisperxModel: string;
   whisperCppPath: string;
   whisperModelPath: string;
   enableDiarization: boolean;
@@ -73,4 +74,12 @@ export interface PipelineResult {
   audioDurationSec: number;
   stagesRun: string[];
   whisperResult: WhisperResult | null;
+}
+
+export interface EnsembleResult {
+  whisperResult: WhisperResult;
+  arbitrated: Transcription[];
+  turbo: Transcription[];
+  whisperx: Transcription[];
+  arbitrationUsed: boolean;
 }

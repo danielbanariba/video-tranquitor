@@ -10,22 +10,22 @@ const DEFAULT_AUDIO_FILTER =
 export function loadConfig(): PipelineConfig {
   config();
 
-  const transcriber = (process.env.TRANSCRIBER ?? "local") as "local" | "openai";
+  const transcriber = (process.env.TRANSCRIBER ?? "local") as "local" | "openai" | "whisperx" | "ensemble";
   const enableDiarization = process.env.ENABLE_DIARIZATION === "true";
 
   if (!process.env.OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY es requerida. Configurala en tu archivo .env");
   }
 
-  if (transcriber === "local") {
+  if (transcriber === "local" || transcriber === "ensemble") {
     if (!process.env.WHISPER_CPP_PATH) {
       throw new Error(
-        "WHISPER_CPP_PATH es requerida cuando TRANSCRIBER=local. Configurala en tu archivo .env"
+        `WHISPER_CPP_PATH es requerida cuando TRANSCRIBER=${transcriber}. Configurala en tu archivo .env`
       );
     }
     if (!process.env.WHISPER_MODEL_PATH) {
       throw new Error(
-        "WHISPER_MODEL_PATH es requerida cuando TRANSCRIBER=local. Configurala en tu archivo .env"
+        `WHISPER_MODEL_PATH es requerida cuando TRANSCRIBER=${transcriber}. Configurala en tu archivo .env`
       );
     }
   }
@@ -55,6 +55,7 @@ export function loadConfig(): PipelineConfig {
     language: process.env.LANGUAGE ?? "es",
     transcriptionPrompt: process.env.TRANSCRIPTION_PROMPT ?? DEFAULT_TRANSCRIPTION_PROMPT,
     transcribeModel: process.env.OPENAI_TRANSCRIBE_MODEL ?? "gpt-4o-transcribe",
+    whisperxModel: process.env.WHISPERX_MODEL ?? "large-v3",
     targetSampleRate: process.env.TARGET_SAMPLE_RATE
       ? parseInt(process.env.TARGET_SAMPLE_RATE, 10)
       : 16000,

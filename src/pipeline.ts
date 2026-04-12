@@ -3,6 +3,8 @@ import { join, basename, extname } from "path";
 import { preprocessAudio, getAudioDuration, formatTime } from "./preprocessor.js";
 import { transcribeOpenAI } from "./transcriber-openai.js";
 import { transcribeLocal, whisperResultToTranscriptions } from "./transcriber.js";
+import { transcribeWhisperX, whisperxResultToTranscriptions } from "./transcriber-whisperx.js";
+import { transcribeEnsemble } from "./transcriber-ensemble.js";
 import { diarize } from "./diarizer.js";
 import { alignSpeakers } from "./aligner.js";
 import { writeToon } from "./writer/toon-writer.js";
@@ -74,6 +76,13 @@ export async function runPipeline(
       config.targetSampleRate,
       config.language
     );
+  } else if (config.transcriber === "whisperx") {
+    whisperResult = await transcribeWhisperX(tempWavPath, config, config.whisperxModel);
+    rawTranscriptions = whisperxResultToTranscriptions(whisperResult);
+  } else if (config.transcriber === "ensemble") {
+    const ensembleResult = await transcribeEnsemble(tempWavPath, config);
+    whisperResult = ensembleResult.whisperResult;
+    rawTranscriptions = ensembleResult.arbitrated;
   } else {
     // config.transcriber === "local"
     whisperResult = await transcribeLocal(tempWavPath, config);
@@ -93,10 +102,13 @@ export async function runPipeline(
 
   // Etapa 3: Diarización
   if (config.enableDiarization) {
-    if (config.transcriber !== "local") {
+    if (
+      whisperResult === null ||
+      whisperResult.segments.length === 0 ||
+      whisperResult.segments[0]?.words?.length === 0
+    ) {
       console.warn(
-        "⚠  Diarización requiere transcriber='local' (se necesitan timestamps a nivel de palabra " +
-        "que solo whisper.cpp provee). Omitiendo diarización."
+        "⚠  Diarización requiere timestamps a nivel de palabra. Omitiendo diarización."
       );
     } else if (whisperResult !== null) {
       stageStart = Date.now();

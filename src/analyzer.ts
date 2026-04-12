@@ -1,12 +1,5 @@
-import { spawn } from "child_process";
-import { writeFileSync, readFileSync, existsSync, unlinkSync, mkdtempSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
 import type { AttributedSegment, AnalysisResult, PipelineConfig } from "./types.js";
-
-const MAX_RETRIES = 3;
-const INITIAL_BACKOFF_MS = 2000;
-const CODEX_TIMEOUT_MS = 10 * 60 * 1000;
+import { callCodexWithSchema } from "./codex-client.js";
 
 const ANALYSIS_SCHEMA = {
   type: "object",
@@ -81,103 +74,24 @@ Devuelve un JSON válido con esta estructura:
 Si no hay requerimientos, accionables o decisiones, devuelve arrays vacíos.`;
 }
 
-async function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function callCodex(prompt: string): Promise<string> {
-  const tmpDir = mkdtempSync(join(tmpdir(), "codex-analyzer-"));
-  const schemaPath = join(tmpDir, "schema.json");
-  const outputPath = join(tmpDir, "output.txt");
-
-  writeFileSync(schemaPath, JSON.stringify(ANALYSIS_SCHEMA), "utf-8");
-
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const child = spawn(
-        "codex",
-        [
-          "exec",
-          "--sandbox", "read-only",
-          "--skip-git-repo-check",
-          "--ephemeral",
-          "--output-schema", schemaPath,
-          "--output-last-message", outputPath,
-          "--color", "never",
-          "-",
-        ],
-        { stdio: ["pipe", "pipe", "pipe"] }
-      );
-
-      const timer = setTimeout(() => {
-        child.kill("SIGKILL");
-        reject(new Error(`Codex timeout (${CODEX_TIMEOUT_MS}ms)`));
-      }, CODEX_TIMEOUT_MS);
-
-      let stderr = "";
-      child.stderr.on("data", (chunk) => {
-        stderr += chunk.toString();
-      });
-      child.stdout.on("data", () => {
-        // drain stdout to prevent buffer blocking
-      });
-
-      child.on("error", (err) => {
-        clearTimeout(timer);
-        reject(err);
-      });
-
-      child.on("close", (code) => {
-        clearTimeout(timer);
-        if (code === 0) {
-          resolve();
-        } else {
-          reject(new Error(`Codex exit ${code}: ${stderr.slice(-500)}`));
-        }
-      });
-
-      child.stdin.write(prompt);
-      child.stdin.end();
-    });
-
-    if (!existsSync(outputPath)) {
-      throw new Error("Codex no generó archivo de salida");
-    }
-
-    const content = readFileSync(outputPath, "utf-8").trim();
-    if (!content) {
-      throw new Error("Respuesta vacía de Codex");
-    }
-
-    return content;
-  } finally {
-    try {
-      if (existsSync(schemaPath)) unlinkSync(schemaPath);
-      if (existsSync(outputPath)) unlinkSync(outputPath);
-    } catch {
-      // ignore cleanup errors
-    }
-  }
-}
-
-function extractJson(raw: string): string {
-  const trimmed = raw.trim();
-  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-    return trimmed;
+function validateAnalysisResult(parsed: unknown): AnalysisResult {
+  const p = parsed as AnalysisResult;
+  if (
+    typeof p.resumen !== "string" ||
+    !Array.isArray(p.requerimientos) ||
+    !Array.isArray(p.accionables) ||
+    !Array.isArray(p.decisiones)
+  ) {
+    throw new Error("Estructura JSON inválida en la respuesta de Codex");
   }
 
-  const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenceMatch) {
-    return fenceMatch[1].trim();
-  }
+  p.accionables = p.accionables.map((a) => ({
+    responsable: a.responsable,
+    tarea: a.tarea,
+    ...(a.fecha ? { fecha: a.fecha } : {}),
+  }));
 
-  const firstBrace = trimmed.indexOf("{");
-  const lastBrace = trimmed.lastIndexOf("}");
-  if (firstBrace !== -1 && lastBrace > firstBrace) {
-    return trimmed.slice(firstBrace, lastBrace + 1);
-  }
-
-  return trimmed;
+  return p;
 }
 
 export async function analyzeTranscription(
@@ -187,47 +101,9 @@ export async function analyzeTranscription(
   const transcriptionText = buildTranscriptionText(transcription);
   const prompt = buildPrompt(transcriptionText);
 
-  let lastError: unknown = null;
-
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      const rawOutput = await callCodex(prompt);
-      const jsonText = extractJson(rawOutput);
-      const parsed = JSON.parse(jsonText) as AnalysisResult;
-
-      if (
-        typeof parsed.resumen !== "string" ||
-        !Array.isArray(parsed.requerimientos) ||
-        !Array.isArray(parsed.accionables) ||
-        !Array.isArray(parsed.decisiones)
-      ) {
-        throw new Error("Estructura JSON inválida en la respuesta de Codex");
-      }
-
-      parsed.accionables = parsed.accionables.map((a) => ({
-        responsable: a.responsable,
-        tarea: a.tarea,
-        ...(a.fecha ? { fecha: a.fecha } : {}),
-      }));
-
-      return parsed;
-    } catch (error) {
-      lastError = error;
-
-      if (attempt < MAX_RETRIES) {
-        const backoffMs = INITIAL_BACKOFF_MS * Math.pow(2, attempt - 1);
-        console.warn(
-          `  Análisis: intento ${attempt}/${MAX_RETRIES} fallido. Reintentando en ${backoffMs / 1000}s...`
-        );
-        await sleep(backoffMs);
-      }
-    }
-  }
-
-  console.error(
-    `E_CODEX_FAILED: Análisis fallido tras ${MAX_RETRIES} intentos.`,
-    lastError instanceof Error ? lastError.message : lastError
-  );
-
-  return null;
+  return callCodexWithSchema(prompt, ANALYSIS_SCHEMA, validateAnalysisResult, {
+    maxRetries: 3,
+    timeoutMs: 10 * 60 * 1000,
+    errorCode: "E_CODEX_FAILED",
+  });
 }
