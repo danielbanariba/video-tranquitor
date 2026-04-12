@@ -1,0 +1,17 @@
+# Python dependencies for video-tranquitor
+# Install with Python 3.12 (Python 3.14 is NOT supported by PyTorch)
+#
+# Setup:
+#   uv venv --python 3.12 venv
+#   source venv/bin/activate
+#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
+#   pip install pyannote.audio
+
+# PyTorch with CUDA 12.4 support (for RTX 3090 Ti)
+# Install separately first:
+#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
+torch>=2.6.0
+torchaudio>=2.6.0
+
+# Speaker diarization
+pyannote.audio>=4.0.4

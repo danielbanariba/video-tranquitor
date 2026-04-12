@@ -18,3 +18,5 @@ node_modules/
 *.py[co]
 *.cpython-*-*.so
 *.so
+vendor/
+venv/
