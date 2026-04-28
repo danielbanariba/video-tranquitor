@@ -73,10 +73,23 @@ readonly MODEL_FILE="$WHISPER_DIR/models/ggml-${MODEL_NAME}.bin"
 # 1. Detección de hardware
 # ---------------------------------------------------------------------------
 
+is_wsl() {
+  grep -qi microsoft /proc/version 2>/dev/null
+}
+
 detect_profile() {
-  # NVIDIA con CUDA: nvidia-smi responde y lista al menos un GPU
+  # NVIDIA con CUDA: nvidia-smi responde y lista al menos un GPU.
+  # (Funciona también en WSL2 — el driver vive del lado de Windows.)
   if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L 2>/dev/null | grep -q "GPU"; then
     echo "nvidia"
+    return
+  fi
+
+  # WSL2 sin NVIDIA: Vulkan va por el driver `dzn` (Vulkan→D3D12) y es
+  # más lento que CPU+AVX2 en la mayoría de los casos. Defaulteamos a CPU.
+  # Si el usuario quiere forzar Vulkan, puede usar --profile=vulkan.
+  if is_wsl; then
+    echo "cpu"
     return
   fi
 
@@ -108,6 +121,7 @@ resolve_profile() {
         local gpu_name
         gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)
         dim "GPU: $gpu_name"
+        is_wsl && dim "Detectado WSL2 — CUDA passthrough activo"
         ;;
       vulkan)
         local gpu_name
@@ -115,11 +129,18 @@ resolve_profile() {
         dim "GPU: $gpu_name"
         ;;
       cpu)
-        dim "Sin GPU detectado — modo CPU+AVX2"
+        if is_wsl; then
+          dim "WSL2 sin NVIDIA — usando CPU+AVX2 (Vulkan vía dzn rinde peor)"
+          dim "Si querés forzar Vulkan igual: ./install.sh --profile=vulkan"
+        else
+          dim "Sin GPU detectado — modo CPU+AVX2"
+        fi
         ;;
     esac
   else
     log "Perfil forzado: $PROFILE"
+    is_wsl && [ "$PROFILE" = "vulkan" ] && \
+      warn "WSL2 + Vulkan: el driver dzn es lento. Probá --profile=cpu si la performance no convence."
   fi
 
   case "$PROFILE" in

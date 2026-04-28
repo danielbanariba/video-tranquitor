@@ -51,13 +51,82 @@ El script detecta tu hardware automáticamente y configura el perfil ideal. Es *
 - Descarga el modelo `ggml-large-v3-turbo` (~1.5 GB).
 - Genera un `.env` adecuado al perfil.
 
+## Instalación en Windows (vía WSL2)
+
+El `install.sh` es bash y depende de herramientas Linux. **No corre nativamente en Windows**, pero corre perfectamente en WSL2 (Linux dentro de Windows). El proceso es:
+
+### Paso 1 — Instalar WSL2 + Ubuntu
+
+Abrí **PowerShell como Administrador** (click derecho → "Ejecutar como administrador") y corré:
+
+```powershell
+wsl --install -d Ubuntu-24.04
+```
+
+Eso instala WSL2 y Ubuntu 24.04. **Reiniciá la PC** cuando termine. Al volver a iniciar, se va a abrir una terminal de Ubuntu pidiéndote crear un usuario y contraseña — ponele lo que quieras (esto es independiente de tu cuenta de Windows).
+
+Si ya tenés WSL pero no Ubuntu 24.04, listá distros con `wsl -l -o` e instalá la que prefieras (`Ubuntu-22.04` también funciona).
+
+### Paso 2 — Instalar el proyecto dentro de Ubuntu
+
+Una vez en la terminal de Ubuntu (la abrís desde el menú Inicio escribiendo "Ubuntu"), corré los comandos normales:
+
+```bash
+sudo apt update && sudo apt upgrade -y
+git clone <url-del-repo> video-tranquitor
+cd video-tranquitor
+./install.sh
+```
+
+`install.sh` detecta que está en WSL2 y elige el perfil correcto automáticamente.
+
+### Paso 3 — Usar el proyecto
+
+Igual que en Linux nativo:
+
+```bash
+source venv/bin/activate
+make start
+```
+
+### Cómo pasar archivos entre Windows y WSL
+
+Los archivos en `Audios/` viven dentro de Linux pero son accesibles desde Windows. Tres formas:
+
+**A. Desde el Explorador de Windows** — escribí en la barra de direcciones:
+```
+\\wsl$\Ubuntu-24.04\home\TU_USUARIO\video-tranquitor\Audios
+```
+Podés arrastrar archivos ahí como cualquier carpeta normal.
+
+**B. Desde la terminal de Ubuntu** — abrí la carpeta actual en el Explorador:
+```bash
+explorer.exe .
+```
+
+**C. Desde PowerShell** — copiá un archivo de Windows a WSL:
+```powershell
+wsl cp "C:\Users\TuUsuario\Videos\reunion.mp4" "/home/TU_USUARIO/video-tranquitor/Audios/"
+```
+
+### Notas de performance en WSL2
+
+- **NVIDIA + CUDA** funciona perfecto en WSL2 (Microsoft + NVIDIA lo soportan oficialmente). El driver vive del lado de Windows y se expone automáticamente. `nvidia-smi` funciona dentro de WSL.
+- **Intel Iris Xe / AMD integrado**: Vulkan en WSL2 va por el driver `dzn` (Vulkan→D3D12), que es **más lento que CPU+AVX2** en muchos casos. Si tu amigo tiene Iris Xe, recomiendo forzar el perfil CPU:
+  ```bash
+  ./install.sh --profile=cpu
+  ```
+- Para el i7-1360P + CPU+AVX2 con `large-v3-turbo`: ~30 min de audio se procesan en ~45-60 min. Si es muy lento, bajale al modelo (`small` procesa en ~5-10 min con calidad aceptable).
+
 ## Requisitos
 
-- **Linux** — probado en Ubuntu/Debian/Pop, Fedora/RHEL, Arch/CachyOS/Manjaro.
+- **Linux nativo** o **Windows 11 con WSL2** (Windows 10 22H2 también sirve).
 - **CPU x86_64 con AVX2** (cualquier Intel/AMD de los últimos 10 años cumple).
 - **8 GB RAM** mínimo (16 GB si vas perfil NVIDIA con WhisperX).
-- **~3 GB libres** (5 GB para perfil NVIDIA por torch+CUDA wheels).
+- **~3 GB libres** (5 GB para perfil NVIDIA por torch+CUDA wheels). En Windows, sumá ~10 GB para WSL+Ubuntu.
 - **GPU opcional** — el proyecto funciona sin GPU, solo más lento.
+
+Distros Linux probadas: Ubuntu/Debian/Pop, Fedora/RHEL, Arch/CachyOS/Manjaro.
 
 No requiere conexión a internet **después** de la instalación (excepto si activás análisis con Codex).
 
