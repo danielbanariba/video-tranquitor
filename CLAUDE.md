@@ -4,41 +4,110 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Project Does
 
-Video-tranquitor transcribes video/audio files into Spanish-language transcripts using OpenAI's Whisper API. It processes files from `Audios/`, extracts and preprocesses audio via FFmpeg, chunks it into 2-minute segments for the API, then outputs timestamped transcripts in TOON format (a custom tabular format via `@toon-format/toon`).
+Video-tranquitor is a Python pipeline (v2.0) that transcribes audio/video files into Spanish, optionally diarizes speakers, runs IA-based analysis to extract requirements/actionables/decisions, and writes the result to a TOON file and/or an Obsidian note. It runs as a one-shot CLI on a single file or as a `watchdog`-based daemon over a drop folder.
+
+The previous TypeScript single-file implementation lives in `.legacy-ts/` for reference. `src/main.ts` no longer exists — the active code is the `video_tranquitor` Python package under `src/`.
 
 ## Commands
 
+The Makefile assumes a venv at `./venv` (Python 3.12 — PyTorch does NOT support 3.14):
+
 ```bash
-npm install   # Install dependencies
-npm start     # Run the app (tsx src/main.ts) — processes all files in Audios/
+make start              # daemon: watch WATCH_DIR (default ./Audios) and process new files
+make process FILE=path  # one-shot: process a single file
+make test               # pytest tests/ -v
+make lint               # ruff check src/ tests/
+make format             # ruff format src/ tests/
 ```
 
-No build step needed — `tsx` executes TypeScript directly. No automated tests exist; validate manually by dropping a file in `Audios/` and checking `output/`.
+Single test file: `venv/bin/python -m pytest tests/test_config.py -v`
+Single test: `venv/bin/python -m pytest tests/test_aligner.py::test_name -v`
+
+The CLI also accepts a positional path: `python -m video_tranquitor path/to/file.mp4`. Without args it falls back to watcher mode.
 
 ## Prerequisites
 
-- `ffmpeg` and `ffprobe` must be on PATH
-- `.env` file with `OPENAI_API_KEY=...`
-- Optional env vars: `OPENAI_TRANSCRIBE_MODEL` (default: `gpt-4o-transcribe`), `TRANSCRIPTION_PROMPT`, `AUDIO_FILTER`
+- Python 3.12 venv at `./venv`. Setup order matters for GPU stack:
+  ```
+  uv venv --python 3.12 venv
+  source venv/bin/activate
+  pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
+  pip install pyannote.audio
+  pip install -e ".[dev]"
+  ```
+- `ffmpeg` and `ffprobe` on PATH (used by `preprocessor.py` and the OpenAI chunker).
+- `.env` with `OPENAI_API_KEY=...` (always required, even when not using the OpenAI transcriber — `load_config` enforces it).
+- `codex` CLI on PATH if `ENABLE_ANALYSIS` or `TRANSCRIBER=ensemble` (the analyzer and ensemble arbiter shell out to `codex exec --output-schema`).
+
+### Env vars consumed by `config.load_config`
+
+Required by transcriber:
+- `TRANSCRIBER` — `local` (default) | `openai` | `whisperx` | `ensemble`
+- `WHISPER_CPP_PATH`, `WHISPER_MODEL_PATH` — required when transcriber is `local` or `ensemble`
+- `HF_TOKEN` — required when `ENABLE_DIARIZATION=true`
+
+Toggles (default ON unless noted):
+- `ENABLE_DIARIZATION` (default `false`), `ENABLE_ANALYSIS`, `ENABLE_OBSIDIAN`, `ENABLE_TOON`
+
+Tuning:
+- `WATCH_DIR` (default `./Audios`), `OUTPUT_DIR` (default `./output`)
+- `OBSIDIAN_VAULT_PATH` (defaults to a hardcoded local path in `config.py` — override in your env)
+- `LANGUAGE` (default `es`), `TRANSCRIPTION_PROMPT`, `AUDIO_FILTER`
+- `OPENAI_TRANSCRIBE_MODEL` (default `gpt-4o-transcribe`), `WHISPERX_MODEL` (default `large-v3`)
+- `TARGET_SAMPLE_RATE` (default `16000`)
 
 ## Architecture
 
-Single-file application: `src/main.ts` (~320 lines). Processing pipeline:
+Entry point: `src/video_tranquitor/__main__.py` → `cli.py` (Click). Two modes:
+- **One-shot** (`--file` or positional): `asyncio.run(run_pipeline(path, config))`.
+- **Watcher** (`--watch` or default): `watcher.start_watcher()` runs a `watchdog.Observer` in a daemon thread, debounces file-creation events (500 ms), pushes paths into a `queue.Queue`, and the asyncio loop drains it and awaits `run_pipeline` per file.
 
-1. **Scan** `Audios/` for supported files (`.mp4`, `.mkv`, `.avi`, `.mov`, `.ogg`, `.mp3`, `.wav`, `.m4a`, `.flac`)
-2. **Preprocess** — FFmpeg extracts audio, downsamples to 16kHz mono, applies highpass/lowpass/denoise/loudnorm filters (with fallback if filters fail)
-3. **Chunk** — Split into 120-second WAV segments, 500ms delay between API calls for rate limiting
-4. **Transcribe** — OpenAI `audio.transcriptions.create()` per chunk, language `es`, returns JSON
-5. **Assemble** — Map transcriptions to time ranges (HH:MM:SS), write `{name}_transcription.toon`
-6. **Micro-segment** — Split 2-min segments into 10-second chunks, distribute text by sentence boundaries (fallback: word boundaries), write `{name}_detailed.toon`
-7. **Cleanup** — Delete temp WAV files and chunk directories
+`pipeline.run_pipeline` is the orchestrator. Stages, all guarded by config flags, all timed and reported via `_stage_log`:
 
-Key data structure: `Transcription { inicio: string, fin: string, texto: string }`
+1. **Preprocess** (`preprocessor.preprocess_audio`) — ffmpeg → 16kHz mono WAV with `audio_filter` (highpass/lowpass/afftdn/loudnorm). On filter failure it auto-retries without filters.
+2. **Transcribe** — selected by `config.transcriber`:
+   - `openai` → `transcribers/openai_api.py`: chunks audio into 2-min WAV pieces via ffmpeg, calls `client.audio.transcriptions.create()` per chunk, 500 ms sleep between calls. Returns `Transcription[]` directly (no word-level timestamps, so diarization is unavailable).
+   - `local` → `transcribers/whispercpp.py`: shells out to `whisper-cli` with `--output-json-full`, parses the JSON into `WhisperResult` (segments + words).
+   - `whisperx` → `transcribers/whisperx.py`: loads `whisperx` as a Python lib, transcribes with VAD, then runs forced alignment (wav2vec2) for word-level timestamps. Frees VRAM between stages.
+   - `ensemble` → `transcribers/ensemble.py`: runs `whisper.cpp` (in a thread) **and** WhisperX (in a `ProcessPoolExecutor` with `spawn` context, to isolate CUDA state) **in parallel**; both outputs are encoded as TOON and arbitrated by `codex exec` with a JSON schema. Falls back to whichever transcriber succeeded if one fails, or to WhisperX if arbitration fails. Arbitrated chunks have their timestamps validated and snapped against the originals.
+3. **Diarize** (`diarizer.diarize`, optional) — only runs when `whisper_result` has word-level tokens. Uses `pyannote/speaker-diarization-3.1` with `HF_TOKEN`.
+4. **Align** (`aligner.align_speakers`) — binary-search-based assignment of each Whisper word to the diarization segment that best matches its `start` (with a 500 ms tolerance window), then groups consecutive same-speaker words into `AttributedSegment` paragraphs.
+5. **Analyze** (`analyzer.analyze_transcription`, optional) — calls `codex_client.call_codex_with_schema` to produce `AnalysisResult { resumen, requerimientos[], accionables[], decisiones[] }`. Failures are non-fatal — pipeline continues.
+6. **Write** — `writers/toon_writer.py` (custom inline TOON encoder, byte-compatible with `@toon-format/toon` v2 from the legacy TS) and `writers/obsidian_writer.py` (Markdown with YAML frontmatter, one note per audio in `OBSIDIAN_VAULT_PATH`). Vault-not-found is a soft error.
+
+Cleanup: temp WAVs and chunk dirs are deleted in `finally`/post-stage blocks.
+
+### Data model (`types.py`, all Pydantic v2)
+
+- `WhisperResult { segments: WhisperSegment[], language }` with `WhisperSegment.words: WhisperWord[]` — the canonical intermediate when word-level timestamps exist.
+- `Transcription { inicio, fin, texto }` (all strings, `HH:MM:SS`) — chunked output for TOON.
+- `AttributedSegment { speaker, text, start, end }` — post-diarization segments.
+- `AnalysisResult` with `Requirement` (id/descripcion/prioridad) + `Accionable` (responsable/tarea/fecha, with a validator that normalizes empty/null `fecha` → `None`).
+- `PipelineConfig` is the single source of truth for runtime config; never read env vars outside `config.py`.
+
+### Key invariants
+
+- All `Transcription` time fields are `HH:MM:SS` strings; `AttributedSegment` uses float seconds. Conversion happens in `pipeline._time_string_to_seconds`.
+- The OpenAI transcriber path **cannot** feed diarization (no `WhisperResult` with words). The pipeline detects this and prints a warning instead of failing.
+- The ensemble path uses `multiprocessing.get_context("spawn")` deliberately — CUDA state must NOT be inherited from the parent. Don't switch to `fork`.
+- `codex_client` writes the schema to a tempfile, pipes the prompt via stdin, and reads `--output-last-message`. It already has retry-with-backoff (3 attempts, 2s→4s→8s). Don't add another retry layer above it.
+- The watcher ignores files starting with `.` or `temp_` — temp WAVs/chunks land in `OUTPUT_DIR` to avoid re-triggering.
 
 ## Conventions
 
-- TypeScript strict mode, ES modules (NodeNext), 2-space indent, double quotes, semicolons
-- `lowerCamelCase` for functions/variables, `UPPER_SNAKE_CASE` for constants
-- All user-facing text (console logs, output content) in Spanish
-- Commits: short, Spanish, sentence-case, no prefixes (e.g. "Mejorar transcripcion de audio")
-- Temp artifacts (`temp_*.wav`, `temp_chunks/`) are auto-cleaned and must not be committed
+- Python 3.12, type hints with `from __future__ import annotations`, `ruff` (line-length 100, rules `E,F,I,UP`).
+- `lower_snake_case` for functions/variables, `UPPER_SNAKE_CASE` for constants, Pydantic `BaseModel` for all data.
+- Heavy imports (`torch`, `whisperx`, `pyannote.audio`, `openai`) are **always** lazy-imported inside the function that uses them — startup time and watcher mode depend on this. Don't promote them to module-level.
+- All user-facing text (logs, Obsidian notes, error messages) is Spanish. Match the existing tone (sentence-case, no emojis except the `⚠` already in use).
+- Commits: short, Spanish, sentence-case (e.g. "Mejorar transcripcion de audio"). Conventional-commit prefixes appear in recent history but the global rule is: no AI attribution / Co-Authored-By.
+- Error codes use a `E_*` prefix string at the start of the message (`E_WHISPER_NOT_FOUND`, `E_VAULT_NOT_FOUND`, `E_CODEX_FAILED`, `E_ARBITRATION_FAILED`) — call-sites pattern-match on them for soft-fail behavior.
+- Don't commit `temp_*.wav`, `temp_chunks/`, `output/`, `.env`, `venv/`, or anything under `Audios/`.
+
+## Tests
+
+`pytest` with `asyncio_mode = "auto"`. Three test files cover the pieces with the most logic:
+- `tests/test_config.py` — env-var parsing and validation in `load_config`
+- `tests/test_aligner.py` — speaker alignment edge cases
+- `tests/test_obsidian_writer.py` — Markdown/frontmatter rendering
+
+Transcribers, diarizer, and the codex client are not unit-tested — validate them by running the pipeline on a real file in `Audios/`.

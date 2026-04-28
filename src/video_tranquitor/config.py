@@ -34,10 +34,14 @@ def load_config() -> PipelineConfig:
         )
 
     enable_diarization = os.environ.get("ENABLE_DIARIZATION", "").lower() == "true"
+    enable_analysis = os.environ.get("ENABLE_ANALYSIS", "true").lower() != "false"
 
-    if not os.environ.get("OPENAI_API_KEY"):
+    # OPENAI_API_KEY solo es obligatoria si TRANSCRIBER=openai.
+    # El CLI `codex` (usado por ensemble y análisis) maneja su propia auth.
+    if transcriber == "openai" and not os.environ.get("OPENAI_API_KEY"):
         raise ValueError(
-            "OPENAI_API_KEY es requerida. Configurala en tu archivo .env"
+            "OPENAI_API_KEY es requerida cuando TRANSCRIBER=openai. "
+            "Configurala en tu archivo .env o cambiá a TRANSCRIBER=local."
         )
 
     if transcriber in ("local", "ensemble"):
@@ -70,15 +74,12 @@ def load_config() -> PipelineConfig:
         whisper_cpp_path=os.environ.get("WHISPER_CPP_PATH", ""),
         whisper_model_path=os.environ.get("WHISPER_MODEL_PATH", ""),
         enable_diarization=enable_diarization,
-        enable_analysis=os.environ.get("ENABLE_ANALYSIS", "true").lower() != "false",
+        enable_analysis=enable_analysis,
         enable_obsidian=os.environ.get("ENABLE_OBSIDIAN", "true").lower() != "false",
         enable_toon=os.environ.get("ENABLE_TOON", "true").lower() != "false",
-        obsidian_vault_path=os.environ.get(
-            "OBSIDIAN_VAULT_PATH",
-            "/home/banar/Desktop/obsidian/Farinter/07-Reuniones",
-        ),
+        obsidian_vault_path=os.environ.get("OBSIDIAN_VAULT_PATH", ""),
         hf_token=os.environ.get("HF_TOKEN", ""),
-        openai_api_key=os.environ["OPENAI_API_KEY"],
+        openai_api_key=os.environ.get("OPENAI_API_KEY", ""),
         audio_filter=os.environ.get("AUDIO_FILTER", DEFAULT_AUDIO_FILTER),
         language=os.environ.get("LANGUAGE", "es"),
         transcription_prompt=os.environ.get(

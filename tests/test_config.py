@@ -76,11 +76,13 @@ class TestLoadConfig:
         assert cfg.transcribe_model == "gpt-4o-transcribe"
         assert cfg.openai_api_key == "sk-test-key"
 
-    # 2. OPENAI_API_KEY missing → raises ValueError
-    def test_raises_when_openai_api_key_missing(
+    # 2. TRANSCRIBER=openai + OPENAI_API_KEY missing → raises ValueError
+    # (En modo 100% local con TRANSCRIBER=local, la key NO es obligatoria.)
+    def test_raises_when_openai_transcriber_and_api_key_missing(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         self._clear_env(monkeypatch)
+        monkeypatch.setenv("TRANSCRIBER", "openai")
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
         from unittest.mock import patch
