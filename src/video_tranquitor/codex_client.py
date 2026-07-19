@@ -149,4 +149,19 @@ async def call_codex_with_schema(
         max_retries,
         str(last_error),
     )
+
+    # Fallback automático a Claude Code CLI si está disponible en PATH.
+    # Cubre quota exhaustion, timeouts y cualquier otro fallo persistente.
+    if shutil.which("claude"):
+        print("  Codex agotó retries. Probando con Claude Code CLI como fallback...")
+        from video_tranquitor.claude_client import call_claude_with_schema
+        return await call_claude_with_schema(
+            prompt=prompt,
+            schema=schema,
+            validate=validate,
+            max_retries=max_retries,
+            timeout_sec=timeout_sec,
+            error_code=error_code,
+        )
+
     return None

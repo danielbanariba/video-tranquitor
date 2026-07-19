@@ -104,6 +104,7 @@ class AnalysisResult(BaseModel):
     requerimientos: list[Requirement]
     accionables: list[Accionable]
     decisiones: list[str]
+    diagrama: str = ""
 
 
 # ---------------------------------------------------------------------------

@@ -56,6 +56,7 @@ def make_analysis(
     requerimientos: list[Requirement] | None = None,
     accionables: list[Accionable] | None = None,
     decisiones: list[str] | None = None,
+    diagrama: str = "",
 ) -> AnalysisResult:
     if requerimientos is None:
         requerimientos = [
@@ -72,6 +73,7 @@ def make_analysis(
         requerimientos=requerimientos,
         accionables=accionables,
         decisiones=decisiones,
+        diagrama=diagrama,
     )
 
 
@@ -323,3 +325,36 @@ class TestWriteObsidianNote:
         content = output_path.read_text(encoding="utf-8")
 
         assert "- Usar Redis para caché" in content
+
+    # Diagrama: non-empty Mermaid string → fenced mermaid block after Resumen
+    def test_renders_diagrama_as_mermaid_block_after_resumen(
+        self, tmp_path: Path
+    ) -> None:
+        diagrama = (
+            "flowchart TD\n"
+            '    A["Problema: deadlock en pagos"] --> B["Otra sesión retiene lock"]\n'
+            '    B --> C["Solución: reintentos con backoff"]'
+        )
+        result = make_result(analysis=make_analysis(diagrama=diagrama))
+        config = make_config(str(tmp_path))
+
+        output_path = write_obsidian_note(result, config)
+        content = output_path.read_text(encoding="utf-8")
+
+        assert "## Diagrama" in content
+        match = re.search(r"```mermaid\n(.*?)\n```", content, re.DOTALL)
+        assert match is not None
+        assert diagrama in match.group(1)
+        # El diagrama visual acompaña al resumen: va inmediatamente después.
+        assert content.index("## Resumen") < content.index("## Diagrama")
+
+    # Diagrama: empty string → no heading and no mermaid fence
+    def test_omits_diagrama_section_when_empty(self, tmp_path: Path) -> None:
+        result = make_result(analysis=make_analysis(diagrama=""))
+        config = make_config(str(tmp_path))
+
+        output_path = write_obsidian_note(result, config)
+        content = output_path.read_text(encoding="utf-8")
+
+        assert "## Diagrama" not in content
+        assert "```mermaid" not in content

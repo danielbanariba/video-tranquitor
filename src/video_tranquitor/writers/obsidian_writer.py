@@ -111,6 +111,11 @@ def write_obsidian_note(result: PipelineResult, config: PipelineConfig) -> Path:
             sections.append("\n## Resumen\n")
             sections.append(analysis.resumen)
 
+        # Diagrama visual del problema y la solución (Obsidian renderiza ```mermaid nativo).
+        if analysis.diagrama:
+            sections.append("\n## Diagrama\n")
+            sections.append("```mermaid\n" + analysis.diagrama + "\n```")
+
         if analysis.requerimientos:
             sections.append("\n## Requerimientos\n")
             req_lines = [

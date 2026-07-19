@@ -38,6 +38,7 @@ The CLI also accepts a positional path: `python -m video_tranquitor path/to/file
 - `ffmpeg` and `ffprobe` on PATH (used by `preprocessor.py` and the OpenAI chunker).
 - `.env` with `OPENAI_API_KEY=...` (always required, even when not using the OpenAI transcriber — `load_config` enforces it).
 - `codex` CLI on PATH if `ENABLE_ANALYSIS` or `TRANSCRIBER=ensemble` (the analyzer and ensemble arbiter shell out to `codex exec --output-schema`).
+- Optional `claude` CLI on PATH — when present, `codex_client` falls back to `claude -p --json-schema` after Codex retries are exhausted (covers quota exhaustion, timeouts, etc.). Uses the user's Claude Code subscription. To opt out, remove `claude` from PATH or rename `src/video_tranquitor/claude_client.py`.
 
 ### Env vars consumed by `config.load_config`
 
@@ -90,7 +91,8 @@ Cleanup: temp WAVs and chunk dirs are deleted in `finally`/post-stage blocks.
 - All `Transcription` time fields are `HH:MM:SS` strings; `AttributedSegment` uses float seconds. Conversion happens in `pipeline._time_string_to_seconds`.
 - The OpenAI transcriber path **cannot** feed diarization (no `WhisperResult` with words). The pipeline detects this and prints a warning instead of failing.
 - The ensemble path uses `multiprocessing.get_context("spawn")` deliberately — CUDA state must NOT be inherited from the parent. Don't switch to `fork`.
-- `codex_client` writes the schema to a tempfile, pipes the prompt via stdin, and reads `--output-last-message`. It already has retry-with-backoff (3 attempts, 2s→4s→8s). Don't add another retry layer above it.
+- `codex_client` writes the schema to a tempfile, pipes the prompt via stdin, and reads `--output-last-message`. It already has retry-with-backoff (3 attempts, 2s→4s→8s). Don't add another retry layer above it. After all 3 Codex retries fail, it falls back automatically to `claude_client` (which mirrors the same retry pattern via `claude -p --json-schema`) — total worst-case is 3 Codex + 3 Claude attempts before returning `None`.
+- `claude_client` is a 1:1 mirror of `codex_client` for Claude Code CLI. Uses `--json-schema` for native structured output, `--tools ""` to disable tool use, `--no-session-persistence` to avoid leaving sessions on disk. Reuses `_extract_json` from `codex_client`. Don't import it directly from analyzer/ensemble — it's invoked transparently as Codex's fallback.
 - The watcher ignores files starting with `.` or `temp_` — temp WAVs/chunks land in `OUTPUT_DIR` to avoid re-triggering.
 
 ## Conventions

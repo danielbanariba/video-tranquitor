@@ -45,8 +45,9 @@ _ANALYSIS_SCHEMA = {
             "type": "array",
             "items": {"type": "string"},
         },
+        "diagrama": {"type": "string"},
     },
-    "required": ["resumen", "requerimientos", "accionables", "decisiones"],
+    "required": ["resumen", "requerimientos", "accionables", "decisiones", "diagrama"],
     "additionalProperties": False,
 }
 
@@ -78,8 +79,16 @@ def _build_prompt(transcription_text: str) -> str:
         '- resumen: Resumen ejecutivo de la reunión en 1-2 párrafos\n'
         '- requerimientos: array con id ("REQ-001"), descripcion, prioridad ("alta"|"media"|"baja")\n'
         '- accionables: array con responsable, tarea, fecha opcional (YYYY-MM-DD)\n'
-        '- decisiones: array de strings\n\n'
-        "Si no hay requerimientos, accionables o decisiones, devuelve arrays vacíos."
+        '- decisiones: array de strings\n'
+        "- diagrama: un diagrama Mermaid válido de tipo `flowchart TD` que modele el problema "
+        "discutido en la reunión y la solución propuesta o decidida, para entenderlo "
+        "visualmente\n\n"
+        "Si no hay requerimientos, accionables o decisiones, devuelve arrays vacíos.\n"
+        "Reglas para el diagrama: devuelve SOLO el cuerpo Mermaid crudo (sin fences ```). "
+        "Usa etiquetas de nodo en español y cortas. Entrecomilla toda etiqueta que tenga "
+        'espacios, paréntesis o caracteres especiales (p. ej. A["Otra sesión retiene lock"]) '
+        "para no romper el parser. Conecta el problema con la solución de forma legible. Si no "
+        'hay un problema o solución claro que diagramar, devuelve un string vacío "".'
     )
 
 
@@ -116,11 +125,17 @@ def _validate_analysis_result(parsed: object) -> AnalysisResult:
         for a in p["accionables"]
     ]
 
+    # diagrama es un campo blando: un diagrama ausente o inválido no debe romper el análisis.
+    diagrama = p.get("diagrama", "")
+    if not isinstance(diagrama, str):
+        diagrama = ""
+
     return AnalysisResult(
         resumen=p["resumen"],
         requerimientos=requerimientos,
         accionables=accionables,
         decisiones=p["decisiones"],
+        diagrama=diagrama,
     )
 
 
