@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from video_tranquitor.analyzer import _build_transcription_text, _validate_analysis_result
+from video_tranquitor.analyzer import (
+    _build_prompt,
+    _build_transcription_text,
+    _validate_analysis_result,
+)
 from video_tranquitor.types import AttributedSegment
 
 
@@ -82,3 +86,28 @@ class TestBuildTranscriptionText:
 
     def test_empty_transcription_returns_empty_string(self) -> None:
         assert _build_transcription_text([]) == ""
+
+
+class TestBuildPrompt:
+    # Los identificadores técnicos son justamente lo que el modelo pierde entre
+    # corridas (se midió: `mongo-dbcrm-hn` apareció en una y no en la siguiente,
+    # con transcripción de entrada idéntica).
+    def test_instructs_verbatim_technical_identifiers(self) -> None:
+        prompt = _build_prompt("SPEAKER_00: la base es mongo-dbcrm-hn en el servidor 202.")
+
+        assert "textual" in prompt.lower()
+        for termino in ("host", "base de datos", "colección", "ruta", "comando"):
+            assert termino in prompt.lower(), f"falta '{termino}' en las reglas de preservación"
+
+    # Si en la charla se nombra a la persona, el accionable debe llevar el nombre
+    # real y no la etiqueta anónima del diarizador.
+    def test_instructs_resolving_speaker_labels_to_names(self) -> None:
+        prompt = _build_prompt("SPEAKER_02: yo lo hago, dice Luis.")
+
+        assert "SPEAKER_" in prompt
+        assert "nombre real" in prompt.lower()
+
+    def test_still_embeds_the_transcription(self) -> None:
+        prompt = _build_prompt("SPEAKER_00: hola.")
+
+        assert "SPEAKER_00: hola." in prompt

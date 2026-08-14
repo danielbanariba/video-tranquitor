@@ -79,7 +79,17 @@ def _build_prompt(transcription_text: str) -> str:
         "- diagrama: un diagrama Mermaid válido de tipo `flowchart TD` que modele el problema "
         "discutido en la reunión y la solución propuesta o decidida, para entenderlo "
         "visualmente\n\n"
-        "Si no hay requerimientos, accionables o decisiones, devuelve arrays vacíos.\n"
+        "Si no hay requerimientos, accionables o decisiones, devuelve arrays vacíos.\n\n"
+        "Preservación textual (crítico): copia TAL CUAL, sin parafrasear ni reemplazar por una "
+        "descripción genérica, todo identificador técnico que aparezca en la charla: nombres de "
+        "host, servidor, base de datos, colección, tabla, campo, archivo, ruta, comando, código "
+        "de error, versión y nombre de sistema o herramienta. Si alguien menciona "
+        '"mongo-dbcrm-hn", el resumen dice "mongo-dbcrm-hn", no "la base del CRM". Esos datos '
+        "son la mitad del valor de la nota: sin ellos nadie puede retomar el trabajo.\n\n"
+        "Hablantes: la transcripción viene etiquetada con SPEAKER_00, SPEAKER_01, etc. porque el "
+        "diarizador no conoce identidades. Si en la conversación se menciona el nombre real de "
+        "quien habla, usalo en responsable y en el resumen (podés aclarar la etiqueta entre "
+        "paréntesis). Solo dejá SPEAKER_XX cuando el nombre no aparezca en ningún momento.\n\n"
         "Reglas para el diagrama: devuelve SOLO el cuerpo Mermaid crudo (sin fences ```). "
         "Usa etiquetas de nodo en español y cortas. Entrecomilla toda etiqueta que tenga "
         'espacios, paréntesis o caracteres especiales (p. ej. A["Otra sesión retiene lock"]) '
