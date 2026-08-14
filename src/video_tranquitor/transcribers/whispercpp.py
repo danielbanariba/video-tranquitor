@@ -21,6 +21,20 @@ logger = logging.getLogger(__name__)
 WHISPER_TIMEOUT_SEC = 30 * 60  # 30 minutos
 CHUNK_DURATION_SEC = 120  # 2 minutos
 
+# Techo para no dejar la máquina sin aire cuando el ensemble corre en paralelo.
+MAX_WHISPER_THREADS = 8
+
+
+def _whisper_threads() -> int:
+    """Cantidad de hilos para whisper-cli, derivada del hardware.
+
+    El binario usa 4 por defecto, un número que no tiene nada que ver con la
+    máquina donde corre. Con GGML_CUDA=ON el trabajo pesado va a la GPU, así
+    que subirlo ayuda poco y competir por todos los núcleos perjudica al leg
+    de WhisperX cuando el ensemble corre los dos en paralelo.
+    """
+    return max(4, min(MAX_WHISPER_THREADS, (os.cpu_count() or 4) // 2))
+
 
 def _parse_whisper_timestamp(ts: str) -> float:
     """Parsea un timestamp de whisper.cpp en formato "HH:MM:SS,mmm" a segundos (float)."""
@@ -93,7 +107,7 @@ def transcribe_local(audio_path: str, config: PipelineConfig) -> WhisperResult:
         "-m", config.whisper_model_path,
         "-f", audio_path,
         "-l", config.language,
-        "--threads", "4",
+        "--threads", str(_whisper_threads()),
         "--output-json-full",
         "--output-file", output_base,
         "--no-prints",

@@ -1,34 +1,38 @@
-__pycache__/
-.web
-*.db
-assets/external/
-*.py[cod]
-env
-__init__.py
-*.log
-favicon.ico
-uploads/
-temp
-temp_*/
-Audios
-Output
-.env
-node_modules/
-*.py[cod]
-*.py[co]
-*.cpython-*-*.so
-*.so
-vendor/
-venv/
-output/
-
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.so
 .pytest_cache/
+.ruff_cache/
 build/
 dist/
 *.egg-info/
 
-# Legacy TS dependencies (keep .legacy-ts itself tracked for reference)
+# Entornos virtuales (el del proyecto es venv/ con Python 3.12)
+venv/
+.venv/
+env/
+
+# Secretos y configuración local
+.env
+
+# Datos de entrada y artefactos generados
+Audios/
+output/
+temp_*
+*.log
+
+# Modelos y binarios de terceros (whisper.cpp compilado)
+vendor/
+
+# Herramientas
+.atl/
+.web
+node_modules/
 .legacy-ts/node_modules/
+
+# Otros
+*.db
+uploads/
+assets/external/
+favicon.ico
