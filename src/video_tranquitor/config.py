@@ -13,9 +13,14 @@ DEFAULT_TRANSCRIPTION_PROMPT = (
     "Mantiene nombres propios, numeros y siglas tal como se escuchan."
 )
 
-DEFAULT_AUDIO_FILTER = (
-    "highpass=f=80, lowpass=f=12000, afftdn=nf=-25, loudnorm=I=-16:TP=-1.5:LRA=11"
-)
+# Sin normalización de volumen a propósito: `loudnorm` costaba 102 de los 112
+# segundos del preprocess (resamplea internamente a 192 kHz) y no aportaba nada.
+# Whisper ya normaliza al calcular el log-mel. Medido sobre 49 min de audio real:
+# la transcripción queda 94.74% palabra-por-palabra igual, difiriendo solo en
+# puntuación, y la diarización coincide al 97.0% una vez resuelta la permutación
+# de etiquetas. El resto de los filtros SÍ aporta: sin ellos aparece daño real
+# en el texto (88.61% de coincidencia).
+DEFAULT_AUDIO_FILTER = "highpass=f=80, lowpass=f=12000, afftdn=nf=-25"
 
 # community-1 reemplaza a speaker-diarization-3.1 (requiere pyannote.audio >= 4.0).
 DEFAULT_DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"

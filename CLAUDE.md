@@ -78,7 +78,7 @@ Entry point: `src/video_tranquitor/__main__.py` → `cli.py` (Click). Two modes:
 
 `pipeline.run_pipeline` is the orchestrator. Stages, all guarded by config flags, all timed and reported via `_stage_log`:
 
-1. **Preprocess** (`preprocessor.preprocess_audio`) — ffmpeg → 16kHz mono WAV with `audio_filter` (highpass/lowpass/afftdn/loudnorm). On filter failure it auto-retries without filters.
+1. **Preprocess** (`preprocessor.preprocess_audio`) — ffmpeg → 16kHz mono WAV with `audio_filter` (highpass/lowpass/afftdn). On filter failure it auto-retries without filters. **Do not re-add `loudnorm`**: measured on 49 min of real audio it cost 102 of the 112 seconds of this stage (it resamples internally to 192 kHz) and bought nothing — Whisper already normalizes when computing the log-mel. Dropping it leaves the transcript 94.74% word-identical (differences are punctuation only) and diarization at 97.0% agreement once label permutation is resolved. The remaining filters *do* earn their place: without them the text degrades to 88.61% agreement with visible content errors.
 2. **Transcribe** — selected by `config.transcriber`:
    - `openai` → `transcribers/openai_api.py`: chunks audio into 2-min WAV pieces via ffmpeg, calls `client.audio.transcriptions.create()` per chunk, 500 ms sleep between calls. Returns `Transcription[]` directly (no word-level timestamps, so diarization is unavailable).
    - `local` → `transcribers/whispercpp.py`: shells out to `whisper-cli` with `--output-json-full`, parses the JSON into `WhisperResult` (segments + words).
