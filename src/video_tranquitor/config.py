@@ -17,6 +17,13 @@ DEFAULT_AUDIO_FILTER = (
     "highpass=f=80, lowpass=f=12000, afftdn=nf=-25, loudnorm=I=-16:TP=-1.5:LRA=11"
 )
 
+# community-1 reemplaza a speaker-diarization-3.1 (requiere pyannote.audio >= 4.0).
+DEFAULT_DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
+
+# Unión de los niveles que aceptan ambos CLIs. Codex soporta `minimal` pero no
+# `max`; Claude Code soporta `max` pero no `minimal`.
+VALID_EFFORT_LEVELS = ("minimal", "low", "medium", "high", "xhigh", "max")
+
 
 def load_config() -> PipelineConfig:
     """Lee el archivo .env y construye un PipelineConfig validado.
@@ -35,6 +42,21 @@ def load_config() -> PipelineConfig:
 
     enable_diarization = os.environ.get("ENABLE_DIARIZATION", "").lower() == "true"
     enable_analysis = os.environ.get("ENABLE_ANALYSIS", "true").lower() != "false"
+
+    analysis_provider = os.environ.get("ANALYSIS_PROVIDER", "codex").lower()
+    if analysis_provider not in ("codex", "claude"):
+        raise ValueError(
+            f"ANALYSIS_PROVIDER='{analysis_provider}' no es válido. "
+            "Valores aceptados: codex, claude"
+        )
+
+    # `minimal` solo existe en Codex; `max` solo en Claude Code.
+    analysis_effort = os.environ.get("ANALYSIS_EFFORT", "").lower()
+    if analysis_effort and analysis_effort not in VALID_EFFORT_LEVELS:
+        raise ValueError(
+            f"ANALYSIS_EFFORT='{analysis_effort}' no es válido. "
+            f"Valores aceptados: {', '.join(VALID_EFFORT_LEVELS)}"
+        )
 
     # OPENAI_API_KEY solo es obligatoria si TRANSCRIBER=openai.
     # El CLI `codex` (usado por ensemble y análisis) maneja su propia auth.
@@ -87,5 +109,12 @@ def load_config() -> PipelineConfig:
         ),
         transcribe_model=os.environ.get("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-transcribe"),
         whisperx_model=os.environ.get("WHISPERX_MODEL", "large-v3"),
+        diarization_model=os.environ.get("DIARIZATION_MODEL", DEFAULT_DIARIZATION_MODEL),
+        diarization_exclusive=(
+            os.environ.get("DIARIZATION_EXCLUSIVE", "true").lower() != "false"
+        ),
+        analysis_provider=analysis_provider,  # type: ignore[arg-type]
+        analysis_model=os.environ.get("ANALYSIS_MODEL", ""),
+        analysis_effort=analysis_effort,
         target_sample_rate=target_sample_rate,
     )

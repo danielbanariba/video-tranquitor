@@ -28,14 +28,28 @@ DEFAULT_ERROR_CODE = "E_CLAUDE_FAILED"
 INITIAL_BACKOFF_SEC = 2.0
 
 
-def _call_claude(prompt: str, schema: object, timeout_sec: float) -> str:
-    """Ejecuta `claude -p` con el prompt en stdin y schema vía --json-schema."""
+def _call_claude(
+    prompt: str,
+    schema: object,
+    timeout_sec: float,
+    model: str = "",
+    effort: str = "",
+) -> str:
+    """Ejecuta `claude -p` con el prompt en stdin y schema vía --json-schema.
+
+    Si `model` está vacío, Claude Code usa el modelo por defecto de la suscripción.
+    `effort` acepta low | medium | high | xhigh | max (no soporta `minimal`).
+    """
     schema_json = json.dumps(schema)
+    model_args = ["--model", model] if model else []
+    effort_args = ["--effort", effort] if effort else []
 
     proc = subprocess.Popen(
         [
             "claude",
             "-p",
+            *model_args,
+            *effort_args,
             "--json-schema", schema_json,
             "--tools", "",
             "--no-session-persistence",
@@ -74,17 +88,25 @@ async def call_claude_with_schema(
     max_retries: int = DEFAULT_MAX_RETRIES,
     timeout_sec: float = DEFAULT_TIMEOUT_SEC,
     error_code: str = DEFAULT_ERROR_CODE,
+    model: str = "",
+    effort: str = "",
 ) -> T | None:
     """Ejecuta Claude Code CLI con un esquema JSON, valida la respuesta y reintenta.
 
     Mismo contrato que call_codex_with_schema: devuelve el objeto validado
     de tipo T, o None si todos los intentos fallaron.
+
+    Args:
+        model:  Modelo de Claude Code. Vacío = el default de la suscripción.
+        effort: Nivel de razonamiento. Vacío = el default del CLI.
     """
     last_error: Exception | None = None
 
     for attempt in range(1, max_retries + 1):
         try:
-            raw_output = await asyncio.to_thread(_call_claude, prompt, schema, timeout_sec)
+            raw_output = await asyncio.to_thread(
+                _call_claude, prompt, schema, timeout_sec, model, effort
+            )
             json_text = _extract_json(raw_output)
             parsed = json.loads(json_text)
             return validate(parsed)

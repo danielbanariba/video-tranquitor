@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from video_tranquitor.codex_client import call_codex_with_schema
+from video_tranquitor.llm_client import call_llm_with_schema
 from video_tranquitor.types import (
     Accionable,
     AnalysisResult,
@@ -52,21 +52,17 @@ _ANALYSIS_SCHEMA = {
 }
 
 
-def _format_seconds(seconds: float) -> str:
-    h = int(seconds) // 3600
-    m = (int(seconds) % 3600) // 60
-    s = int(seconds) % 60
-    return f"{h:02d}:{m:02d}:{s:02d}"
-
-
 def _build_transcription_text(transcription: list[AttributedSegment]) -> str:
+    """Arma el texto que se le manda al modelo.
+
+    Conserva el prefijo de hablante — es lo que permite atribuir cada accionable
+    a un responsable, campo obligatorio del schema. No incluye timestamps: el
+    schema no pide marcas de tiempo y el orden ya está implícito en el orden de
+    las líneas, así que solo agregarían tokens.
+    """
     lines: list[str] = []
     for seg in transcription:
-        time_label = _format_seconds(seg.start)
-        if seg.speaker:
-            lines.append(f"{seg.speaker} ({time_label}): {seg.text}")
-        else:
-            lines.append(f"({time_label}): {seg.text}")
+        lines.append(f"{seg.speaker}: {seg.text}" if seg.speaker else seg.text)
     return "\n".join(lines)
 
 
@@ -141,16 +137,19 @@ def _validate_analysis_result(parsed: object) -> AnalysisResult:
 
 async def analyze_transcription(
     transcription: list[AttributedSegment],
-    _config: PipelineConfig,
+    config: PipelineConfig,
 ) -> AnalysisResult | None:
     """Analiza una transcripción usando Codex y devuelve el resultado estructurado."""
     transcription_text = _build_transcription_text(transcription)
     prompt = _build_prompt(transcription_text)
 
-    return await call_codex_with_schema(
+    return await call_llm_with_schema(
         prompt=prompt,
         schema=_ANALYSIS_SCHEMA,
         validate=_validate_analysis_result,
+        provider=config.analysis_provider,
+        model=config.analysis_model,
+        effort=config.analysis_effort,
         max_retries=3,
         timeout_sec=10 * 60,
         error_code="E_CODEX_FAILED",

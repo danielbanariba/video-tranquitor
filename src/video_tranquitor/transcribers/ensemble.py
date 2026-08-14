@@ -7,7 +7,7 @@ import logging
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 
-from video_tranquitor.codex_client import call_codex_with_schema
+from video_tranquitor.llm_client import call_llm_with_schema
 from video_tranquitor.transcribers.whispercpp import (
     transcribe_local,
     whisper_result_to_transcriptions,
@@ -216,7 +216,7 @@ async def transcribe_ensemble(
             arbitration_used=False,
         )
 
-    # Caso 4: ambos OK — arbitración con Codex
+    # Caso 4: ambos OK — arbitración con el proveedor configurado
     # (narrowing garantizado por los checks anteriores)
     from video_tranquitor.writers.toon_writer import encode  # noqa: PLC0415 — importación tardía
 
@@ -228,10 +228,13 @@ async def transcribe_ensemble(
 
     arbitration_prompt = _build_arbitration_prompt(toon_turbo, toon_whisperx)
 
-    arbitration_response = await call_codex_with_schema(
+    arbitration_response = await call_llm_with_schema(
         prompt=arbitration_prompt,
         schema=ENSEMBLE_SCHEMA,
         validate=_validate_arbitration_result,
+        provider=config.analysis_provider,
+        model=config.analysis_model,
+        effort=config.analysis_effort,
         max_retries=3,
         timeout_sec=20 * 60,
         error_code="E_ARBITRATION_FAILED",

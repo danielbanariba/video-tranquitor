@@ -30,6 +30,11 @@ class PipelineConfig(BaseModel):
     language: str
     transcription_prompt: str
     transcribe_model: str
+    diarization_model: str = "pyannote/speaker-diarization-community-1"
+    diarization_exclusive: bool = True
+    analysis_provider: Literal["codex", "claude"] = "codex"
+    analysis_model: str = ""
+    analysis_effort: str = ""
     target_sample_rate: int
 
 

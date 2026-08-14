@@ -32,11 +32,12 @@ The CLI also accepts a positional path: `python -m video_tranquitor path/to/file
   uv venv --python 3.12 venv
   source venv/bin/activate
   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
-  pip install pyannote.audio
+  pip install "pyannote.audio>=4.0"
   pip install -e ".[dev]"
   ```
 - `ffmpeg` and `ffprobe` on PATH (used by `preprocessor.py` and the OpenAI chunker).
-- `.env` with `OPENAI_API_KEY=...` (always required, even when not using the OpenAI transcriber — `load_config` enforces it).
+- `.env` with `OPENAI_API_KEY=...` — only required when `TRANSCRIBER=openai`; `load_config` does not enforce it otherwise (the `codex`/`claude` CLIs handle their own auth).
+- For diarization, accept the user conditions for `pyannote/speaker-diarization-community-1` on Hugging Face and set `HF_TOKEN`. Without an accepted license the pipeline load fails with a 401.
 - `codex` CLI on PATH if `ENABLE_ANALYSIS` or `TRANSCRIBER=ensemble` (the analyzer and ensemble arbiter shell out to `codex exec --output-schema`).
 - Optional `claude` CLI on PATH — when present, `codex_client` falls back to `claude -p --json-schema` after Codex retries are exhausted (covers quota exhaustion, timeouts, etc.). Uses the user's Claude Code subscription. To opt out, remove `claude` from PATH or rename `src/video_tranquitor/claude_client.py`.
 
@@ -55,6 +56,18 @@ Tuning:
 - `OBSIDIAN_VAULT_PATH` (defaults to a hardcoded local path in `config.py` — override in your env)
 - `LANGUAGE` (default `es`), `TRANSCRIPTION_PROMPT`, `AUDIO_FILTER`
 - `OPENAI_TRANSCRIBE_MODEL` (default `gpt-4o-transcribe`), `WHISPERX_MODEL` (default `large-v3`)
+- `DIARIZATION_MODEL` (default `pyannote/speaker-diarization-community-1`)
+- `DIARIZATION_EXCLUSIVE` (default `true`) — use the non-overlapping `exclusive_speaker_diarization`
+  output when the checkpoint exposes it; falls back to the standard output otherwise
+- `ANALYSIS_PROVIDER` — `codex` (default) | `claude`. Picks which CLI runs the analyzer and the
+  ensemble arbiter. `codex` keeps its automatic Claude fallback after retries; `claude` goes
+  straight to Claude Code and never touches Codex (use it when ChatGPT quota is exhausted)
+- `ANALYSIS_MODEL` — model for the selected provider. Empty (default) uses that provider's own
+  default. Codex: `gpt-5.6-sol` etc. (or whatever `~/.codex/config.toml` says). Claude: `opus`,
+  `sonnet`, `fable`, or a full name like `claude-opus-5`
+- `ANALYSIS_EFFORT` — reasoning effort. Codex accepts `minimal|low|medium|high|xhigh`
+  (passed as `-c model_reasoning_effort=`); Claude accepts `low|medium|high|xhigh|max`
+  (passed as `--effort`). Empty (default) uses the provider default
 - `TARGET_SAMPLE_RATE` (default `16000`)
 
 ## Architecture
@@ -71,9 +84,12 @@ Entry point: `src/video_tranquitor/__main__.py` → `cli.py` (Click). Two modes:
    - `local` → `transcribers/whispercpp.py`: shells out to `whisper-cli` with `--output-json-full`, parses the JSON into `WhisperResult` (segments + words).
    - `whisperx` → `transcribers/whisperx.py`: loads `whisperx` as a Python lib, transcribes with VAD, then runs forced alignment (wav2vec2) for word-level timestamps. Frees VRAM between stages.
    - `ensemble` → `transcribers/ensemble.py`: runs `whisper.cpp` (in a thread) **and** WhisperX (in a `ProcessPoolExecutor` with `spawn` context, to isolate CUDA state) **in parallel**; both outputs are encoded as TOON and arbitrated by `codex exec` with a JSON schema. Falls back to whichever transcriber succeeded if one fails, or to WhisperX if arbitration fails. Arbitrated chunks have their timestamps validated and snapped against the originals.
-3. **Diarize** (`diarizer.diarize`, optional) — only runs when `whisper_result` has word-level tokens. Uses `pyannote/speaker-diarization-3.1` with `HF_TOKEN`.
+3. **Diarize** (`diarizer.diarize`, optional) — only runs when `whisper_result` has word-level tokens. Loads `config.diarization_model` (default `pyannote/speaker-diarization-community-1`, requires pyannote.audio 4.x) with `HF_TOKEN`. Three compatibility shims live here:
+   - `_load_pipeline` handles the 3.x→4.x `use_auth_token`→`token` rename.
+   - `_load_audio_in_memory` reads the preprocessed WAV with the stdlib `wave` module and hands pyannote a `{"waveform", "sample_rate"}` dict. **This is required, not an optimization** — pyannote 4.x decodes via `torchcodec`, which only supports ffmpeg 4–7. On a system with ffmpeg 8+ the path-based call dies with `NameError: name 'AudioDecoder' is not defined`. Returns `None` for non-PCM WAVs so the caller falls back to passing the path.
+   - `_resolve_annotation` handles both output shapes (4.x returns a `DiarizeOutput` with `speaker_diarization` / `exclusive_speaker_diarization`; 3.x returns the `Annotation` directly).
 4. **Align** (`aligner.align_speakers`) — binary-search-based assignment of each Whisper word to the diarization segment that best matches its `start` (with a 500 ms tolerance window), then groups consecutive same-speaker words into `AttributedSegment` paragraphs.
-5. **Analyze** (`analyzer.analyze_transcription`, optional) — calls `codex_client.call_codex_with_schema` to produce `AnalysisResult { resumen, requerimientos[], accionables[], decisiones[] }`. Failures are non-fatal — pipeline continues.
+5. **Analyze** (`analyzer.analyze_transcription`, optional) — calls `llm_client.call_llm_with_schema`, which dispatches to `codex_client` or `claude_client` per `config.analysis_provider`, to produce `AnalysisResult { resumen, requerimientos[], accionables[], decisiones[], diagrama }`. Failures are non-fatal — pipeline continues.
 6. **Write** — `writers/toon_writer.py` (custom inline TOON encoder, byte-compatible with `@toon-format/toon` v2 from the legacy TS) and `writers/obsidian_writer.py` (Markdown with YAML frontmatter, one note per audio in `OBSIDIAN_VAULT_PATH`). Vault-not-found is a soft error.
 
 Cleanup: temp WAVs and chunk dirs are deleted in `finally`/post-stage blocks.
@@ -92,7 +108,8 @@ Cleanup: temp WAVs and chunk dirs are deleted in `finally`/post-stage blocks.
 - The OpenAI transcriber path **cannot** feed diarization (no `WhisperResult` with words). The pipeline detects this and prints a warning instead of failing.
 - The ensemble path uses `multiprocessing.get_context("spawn")` deliberately — CUDA state must NOT be inherited from the parent. Don't switch to `fork`.
 - `codex_client` writes the schema to a tempfile, pipes the prompt via stdin, and reads `--output-last-message`. It already has retry-with-backoff (3 attempts, 2s→4s→8s). Don't add another retry layer above it. After all 3 Codex retries fail, it falls back automatically to `claude_client` (which mirrors the same retry pattern via `claude -p --json-schema`) — total worst-case is 3 Codex + 3 Claude attempts before returning `None`.
-- `claude_client` is a 1:1 mirror of `codex_client` for Claude Code CLI. Uses `--json-schema` for native structured output, `--tools ""` to disable tool use, `--no-session-persistence` to avoid leaving sessions on disk. Reuses `_extract_json` from `codex_client`. Don't import it directly from analyzer/ensemble — it's invoked transparently as Codex's fallback.
+- `claude_client` is a 1:1 mirror of `codex_client` for Claude Code CLI. Uses `--json-schema` for native structured output, `--tools ""` to disable tool use, `--no-session-persistence` to avoid leaving sessions on disk. Reuses `_extract_json` from `codex_client`. Don't import it directly from analyzer/ensemble — go through `llm_client.call_llm_with_schema`, which is the only provider-selection point.
+- `ANALYSIS_MODEL` is never forwarded from Codex to its Claude fallback (an OpenAI model ID is invalid there). `ANALYSIS_EFFORT` is forwarded only when the level exists in both CLIs — see `codex_client.SHARED_EFFORT_LEVELS`. Codex-only `minimal` and Claude-only `max` are dropped on the way across.
 - The watcher ignores files starting with `.` or `temp_` — temp WAVs/chunks land in `OUTPUT_DIR` to avoid re-triggering.
 
 ## Conventions
