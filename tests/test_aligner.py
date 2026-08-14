@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import pytest
-
 from video_tranquitor.aligner import align_speakers
 from video_tranquitor.types import (
-    AttributedSegment,
     DiarizationSegment,
     WhisperResult,
     WhisperSegment,

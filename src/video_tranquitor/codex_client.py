@@ -9,11 +9,9 @@ import os
 import shutil
 import subprocess
 import tempfile
-from typing import Callable, TypeVar
+from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
-
-T = TypeVar("T")
 
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_TIMEOUT_SEC = 20 * 60  # 20 minutos
@@ -121,7 +119,7 @@ def _call_codex(
             pass
 
 
-async def call_codex_with_schema(
+async def call_codex_with_schema[T](
     prompt: str,
     schema: object,
     validate: Callable[[object], T],

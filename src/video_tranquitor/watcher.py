@@ -7,8 +7,9 @@ import os
 import queue
 import signal
 import threading
+from collections.abc import Callable, Coroutine
 from pathlib import Path
-from typing import Callable, Coroutine, Any
+from typing import Any
 
 from watchdog.events import FileCreatedEvent, FileSystemEventHandler
 from watchdog.observers import Observer
@@ -23,7 +24,7 @@ DEBOUNCE_S = 0.5
 class _Handler(FileSystemEventHandler):
     """Manejador de eventos del sistema de archivos."""
 
-    def __init__(self, file_queue: "queue.Queue[str]") -> None:
+    def __init__(self, file_queue: queue.Queue[str]) -> None:
         super().__init__()
         self._queue = file_queue
         self._timers: dict[str, threading.Timer] = {}

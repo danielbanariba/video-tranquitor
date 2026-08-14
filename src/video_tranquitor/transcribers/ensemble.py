@@ -13,7 +13,6 @@ from video_tranquitor.transcribers.whispercpp import (
     whisper_result_to_transcriptions,
 )
 from video_tranquitor.transcribers.whisperx import (
-    transcribe_whisperx,
     whisperx_result_to_transcriptions,
 )
 from video_tranquitor.types import EnsembleResult, PipelineConfig, Transcription, WhisperResult
@@ -61,20 +60,27 @@ ENSEMBLE_SCHEMA = {
 
 def _build_arbitration_prompt(toon_turbo: str, toon_whisperx: str) -> str:
     return (
-        "Sos un experto en transcripción de audio en español. Te paso DOS transcripciones del mismo audio "
-        "en formato TOON (tabular), una de whisper.cpp turbo y otra de WhisperX con large-v3.\n\n"
-        "Tu tarea: producir UNA transcripción consensuada, chunk por chunk, eligiendo la mejor versión "
-        "basándote en el CONTEXTO global de la reunión.\n\n"
+        "Sos un experto en transcripción de audio en español. Te paso DOS transcripciones "
+        "del mismo audio en formato TOON (tabular), una de whisper.cpp turbo y otra de "
+        "WhisperX con large-v3.\n\n"
+        "Tu tarea: producir UNA transcripción consensuada, chunk por chunk, eligiendo la "
+        "mejor versión basándote en el CONTEXTO global de la reunión.\n\n"
         "Reglas:\n"
-        "- Cada chunk tiene los mismos timestamps (inicio, fin) en ambas transcripciones — conservalos EXACTOS\n"
-        "- Cuando difieran en un nombre propio, elegí el que sea consistente con el resto de la reunión "
-        "(ej: si \"Edwin\" aparece 10 veces y \"Edo\" solo 1, probablemente era \"Edwin\" en todos los casos)\n"
+        "- Cada chunk tiene los mismos timestamps (inicio, fin) en ambas transcripciones — "
+        "conservalos EXACTOS\n"
+        "- Cuando difieran en un nombre propio, elegí el que sea consistente con el resto "
+        'de la reunión (ej: si "Edwin" aparece 10 veces y "Edo" solo 1, probablemente era '
+        '"Edwin" en todos los casos)\n'
         "- Cuando difieran en términos técnicos, elegí el que tenga sentido en el contexto\n"
-        "- Cuando una versión tenga duplicaciones (mismo texto en 2 chunks seguidos), preferí la otra\n"
-        "- Si no podés decidir con certeza, usá la versión de WhisperX (es más precisa en general)\n"
-        "- NO inventes texto nuevo: solo elegí entre las dos versiones existentes, o combinalas palabra por palabra\n"
+        "- Cuando una versión tenga duplicaciones (mismo texto en 2 chunks seguidos), "
+        "preferí la otra\n"
+        "- Si no podés decidir con certeza, usá la versión de WhisperX (es más precisa en "
+        "general)\n"
+        "- NO inventes texto nuevo: solo elegí entre las dos versiones existentes, o "
+        "combinalas palabra por palabra\n"
         "- NO cambies los timestamps\n\n"
-        "Devolvé el resultado como JSON con la estructura: { \"transcripciones\": [{inicio, fin, texto}] }\n\n"
+        "Devolvé el resultado como JSON con la estructura: "
+        '{ "transcripciones": [{inicio, fin, texto}] }\n\n'
         f"=== TURBO (whisper.cpp) ===\n{toon_turbo}\n\n"
         f"=== WHISPERX (large-v3) ===\n{toon_whisperx}"
     )
@@ -191,7 +197,7 @@ async def transcribe_ensemble(
         logger.warning(
             "Ensemble: WhisperX falló (%s). Usando solo whisper.cpp turbo.", whisperx_settled
         )
-        print(f"  Ensemble: WhisperX falló. Usando solo whisper.cpp turbo.")
+        print("  Ensemble: WhisperX falló. Usando solo whisper.cpp turbo.")
         turbo_chunks = whisper_result_to_transcriptions(turbo_settled)  # type: ignore[arg-type]
         return EnsembleResult(
             whisper_result=turbo_settled,  # type: ignore[arg-type]
@@ -206,7 +212,7 @@ async def transcribe_ensemble(
         logger.warning(
             "Ensemble: whisper.cpp falló (%s). Usando solo WhisperX.", turbo_settled
         )
-        print(f"  Ensemble: whisper.cpp falló. Usando solo WhisperX.")
+        print("  Ensemble: whisper.cpp falló. Usando solo WhisperX.")
         whisperx_chunks = whisperx_result_to_transcriptions(whisperx_settled, 120)  # type: ignore[arg-type]
         return EnsembleResult(
             whisper_result=whisperx_settled,  # type: ignore[arg-type]

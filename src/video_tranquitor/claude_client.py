@@ -14,13 +14,11 @@ import asyncio
 import json
 import logging
 import subprocess
-from typing import Callable, TypeVar
+from collections.abc import Callable
 
 from video_tranquitor.codex_client import _extract_json
 
 logger = logging.getLogger(__name__)
-
-T = TypeVar("T")
 
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_TIMEOUT_SEC = 20 * 60
@@ -81,7 +79,7 @@ def _call_claude(
     return content
 
 
-async def call_claude_with_schema(
+async def call_claude_with_schema[T](
     prompt: str,
     schema: object,
     validate: Callable[[object], T],

@@ -11,6 +11,7 @@ from video_tranquitor.aligner import align_speakers
 from video_tranquitor.analyzer import analyze_transcription
 from video_tranquitor.diarizer import diarize
 from video_tranquitor.preprocessor import format_time, get_audio_duration, preprocess_audio
+from video_tranquitor.transcribers.ensemble import transcribe_ensemble
 from video_tranquitor.transcribers.openai_api import transcribe_openai
 from video_tranquitor.transcribers.whispercpp import (
     transcribe_local,
@@ -20,7 +21,6 @@ from video_tranquitor.transcribers.whisperx import (
     transcribe_whisperx,
     whisperx_result_to_transcriptions,
 )
-from video_tranquitor.transcribers.ensemble import transcribe_ensemble
 from video_tranquitor.types import (
     AnalysisResult,
     AttributedSegment,

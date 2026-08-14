@@ -88,7 +88,10 @@ def transcribe_openai(
     duration_ms = duration * 1000
     chunk_length_ms = _CHUNK_LENGTH_SEC * 1000
     transcriptions: list[Transcription] = []
-    total_chunks = max(1, int(duration_ms / chunk_length_ms) + (1 if duration_ms % chunk_length_ms else 0))
+    total_chunks = max(
+        1,
+        int(duration_ms / chunk_length_ms) + (1 if duration_ms % chunk_length_ms else 0),
+    )
 
     temp_dir = tempfile.mkdtemp(prefix="vt-openai-chunks-")
 

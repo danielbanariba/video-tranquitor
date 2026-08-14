@@ -73,7 +73,8 @@ def _build_prompt(transcription_text: str) -> str:
         f"Transcripción:\n{transcription_text}\n\n"
         "Devuelve un JSON válido con esta estructura:\n"
         '- resumen: Resumen ejecutivo de la reunión en 1-2 párrafos\n'
-        '- requerimientos: array con id ("REQ-001"), descripcion, prioridad ("alta"|"media"|"baja")\n'
+        '- requerimientos: array con id ("REQ-001"), descripcion, '
+        'prioridad ("alta"|"media"|"baja")\n'
         '- accionables: array con responsable, tarea, fecha opcional (YYYY-MM-DD)\n'
         '- decisiones: array de strings\n'
         "- diagrama: un diagrama Mermaid válido de tipo `flowchart TD` que modele el problema "

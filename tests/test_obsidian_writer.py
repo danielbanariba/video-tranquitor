@@ -1,4 +1,7 @@
-"""Tests para video_tranquitor.writers.obsidian_writer — port de obsidian-writer.test.ts (15 tests)."""
+"""Tests para video_tranquitor.writers.obsidian_writer.
+
+Port de obsidian-writer.test.ts (15 tests) de la implementación TypeScript.
+"""
 
 from __future__ import annotations
 
