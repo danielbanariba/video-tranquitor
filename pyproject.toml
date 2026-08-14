@@ -6,16 +6,34 @@ build-backend = "setuptools.build_meta"
 name = "video-tranquitor"
 version = "2.0.0"
 description = "Pipeline de transcripción y análisis de audio/video"
-requires-python = ">=3.12"
+# El techo es real, no defensivo: PyTorch no publica ruedas para 3.14.
+requires-python = ">=3.12,<3.14"
+
+# Lo mínimo para correr con TRANSCRIBER=local (whisper.cpp por subprocess) y
+# sin diarización. El análisis usa los CLI `codex` / `claude`, que no son
+# dependencias de Python.
 dependencies = [
     "pydantic>=2",
-    "python-dotenv",
-    "watchdog",
-    "click",
-    "openai",
+    "python-dotenv>=1",
+    "watchdog>=6",
+    "click>=8",
 ]
 
 [project.optional-dependencies]
+# TRANSCRIBER=whisperx|ensemble y ENABLE_DIARIZATION=true.
+# pyannote.audio 4.x es obligatorio: 3.x usa `use_auth_token` en vez de `token`
+# y no expone `exclusive_speaker_diarization`.
+gpu = [
+    "torch>=2.8",
+    "torchaudio>=2.8",
+    "whisperx>=3.8",
+    "pyannote.audio>=4.0",
+    "numpy>=2",
+]
+
+# TRANSCRIBER=openai.
+openai = ["openai>=2"]
+
 dev = [
     "pytest",
     "pytest-asyncio",
@@ -25,6 +43,17 @@ dev = [
 
 [project.scripts]
 video-tranquitor = "video_tranquitor.__main__:main"
+
+# Las ruedas de PyTorch con CUDA no están en PyPI. Sin esto, `uv sync --extra gpu`
+# instala la build de CPU y la GPU queda sin usar.
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchaudio = { index = "pytorch-cu128" }
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
 
 [tool.setuptools.packages.find]
 where = ["src"]

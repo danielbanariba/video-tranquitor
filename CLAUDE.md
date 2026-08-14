@@ -27,14 +27,23 @@ The CLI also accepts a positional path: `python -m video_tranquitor path/to/file
 
 ## Prerequisites
 
-- Python 3.12 venv at `./venv`. Setup order matters for GPU stack:
+- Python 3.12 venv at `./venv`. **3.14 will not work** — PyTorch publishes no wheels for it, which is
+  why `requires-python` is capped at `<3.14`.
   ```
   uv venv --python 3.12 venv
   source venv/bin/activate
-  pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
-  pip install "pyannote.audio>=4.0"
-  pip install -e ".[dev]"
+  uv pip install -e ".[gpu,dev]"
   ```
+  Dependencies are declared as extras because they are genuinely optional:
+  - core (always): `pydantic`, `python-dotenv`, `watchdog`, `click` — enough for `TRANSCRIBER=local`
+    with diarization off. The analyzer shells out to the `codex`/`claude` CLIs, which are not Python deps.
+  - `[gpu]`: `torch`, `torchaudio`, `whisperx`, `pyannote.audio>=4.0`, `numpy` — required for
+    `TRANSCRIBER=whisperx|ensemble` and for `ENABLE_DIARIZATION=true`.
+  - `[openai]`: only for `TRANSCRIBER=openai`.
+
+  `[tool.uv.sources]` pins `torch`/`torchaudio` to the `cu128` index — the CUDA wheels are not on
+  PyPI, so without it you silently get the CPU build and the GPU sits idle. With plain `pip`, install
+  them first: `pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128`.
 - `ffmpeg` and `ffprobe` on PATH (used by `preprocessor.py` and the OpenAI chunker).
 - `.env` with `OPENAI_API_KEY=...` — only required when `TRANSCRIBER=openai`; `load_config` does not enforce it otherwise (the `codex`/`claude` CLIs handle their own auth).
 - For diarization, accept the user conditions for `pyannote/speaker-diarization-community-1` on Hugging Face and set `HF_TOKEN`. Without an accepted license the pipeline load fails with a 401.
