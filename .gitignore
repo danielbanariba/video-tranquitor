@@ -13,8 +13,10 @@ venv/
 .venv/
 env/
 
-# Secretos y configuración local
+# Secretos y configuración local (incluye backups tipo .env.bak)
 .env
+.env.*
+!.env.example
 
 # Datos de entrada y artefactos generados
 Audios/
