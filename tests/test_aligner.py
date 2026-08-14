@@ -243,3 +243,61 @@ class TestAlignSpeakers:
         assert len(result) == 1
         # SPEAKER_00 is 0.1s away; SPEAKER_01 is 14.9s away
         assert result[0].speaker == "SPEAKER_00"
+
+    # ---------------------------------------------------------------------
+    # Convención de espaciado entre transcriptores
+    # ---------------------------------------------------------------------
+
+    # whisper.cpp emite piezas subword con espacio inicial → concatenar directo
+    def test_joins_whispercpp_tokens_without_adding_spaces(self) -> None:
+        whisper = make_whisper_result([
+            make_segment("Hola mundo", 0.0, 2.0, [
+                make_word(" Hola", 0.0, 0.5),
+                make_word(" mund", 0.6, 1.0),
+                make_word("o", 1.0, 1.2),
+                make_word(",", 1.2, 1.3),
+                make_word(" qué", 1.4, 2.0),
+            ])
+        ])
+        speakers = [make_speaker("SPEAKER_00", 0.0, 2.0)]
+
+        result = align_speakers(whisper, speakers)
+        assert result[0].text == "Hola mundo, qué"
+
+    # WhisperX emite palabras completas ya recortadas → unir con espacio
+    def test_joins_whisperx_words_with_spaces(self) -> None:
+        whisper = make_whisper_result([
+            make_segment("Ok, entonces esto sería esto.", 0.0, 3.0, [
+                make_word("Ok,", 0.0, 0.4),
+                make_word("entonces", 0.5, 1.0),
+                make_word("esto", 1.1, 1.5),
+                make_word("sería", 1.6, 2.0),
+                make_word("esto.", 2.1, 3.0),
+            ])
+        ])
+        speakers = [make_speaker("SPEAKER_00", 0.0, 3.0)]
+
+        result = align_speakers(whisper, speakers)
+        assert result[0].text == "Ok, entonces esto sería esto."
+
+    # La convención se decide con TODOS los tokens, no por grupo:
+    # un grupo que arranca a mitad de palabra no debe cambiar de criterio.
+    def test_spacing_convention_is_global_not_per_group(self) -> None:
+        whisper = make_whisper_result([
+            make_segment("Hola mundo", 0.0, 4.0, [
+                make_word(" Hola", 0.0, 0.5),
+                make_word(" mund", 0.6, 1.0),
+                # el grupo del segundo speaker arranca con una pieza subword
+                make_word("o", 3.0, 3.2),
+                make_word(" listo", 3.3, 4.0),
+            ])
+        ])
+        speakers = [
+            make_speaker("SPEAKER_00", 0.0, 1.0),
+            make_speaker("SPEAKER_01", 3.0, 4.0),
+        ]
+
+        result = align_speakers(whisper, speakers)
+        assert len(result) == 2
+        assert result[0].text == "Hola mund"
+        assert result[1].text == "o listo"

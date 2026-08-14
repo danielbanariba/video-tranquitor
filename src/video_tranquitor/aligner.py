@@ -68,6 +68,27 @@ def _find_speaker_index(
     return nearest_idx
 
 
+def _tokens_carry_leading_space(words: list[WhisperWord]) -> bool:
+    """Detecta la convención de espaciado del transcriptor que generó los tokens.
+
+    whisper.cpp emite piezas subword con el espacio ya incluido (" Hola", " mund",
+    "o"), así que concatenarlas directo reconstruye el texto. WhisperX emite
+    palabras completas y recortadas ("Hola", "mundo"), que hay que unir con espacio.
+
+    La decisión se toma mirando TODOS los tokens del resultado, nunca por grupo:
+    un grupo que arranca en una pieza subword no tiene espacios iniciales y
+    elegiría mal por su cuenta.
+    """
+    return any(w.word[:1].isspace() for w in words)
+
+
+def _join_words(words: list[WhisperWord], leading_space: bool) -> str:
+    """Une los tokens de un grupo según la convención detectada."""
+    if leading_space:
+        return "".join(w.word for w in words).strip()
+    return " ".join(w.word for w in words if w.word).strip()
+
+
 def align_speakers(
     whisper_result: WhisperResult,
     speakers: list[DiarizationSegment],
@@ -119,6 +140,9 @@ def align_speakers(
 
     tolerance_sec = tolerance_ms / 1000.0
 
+    # Convención de espaciado: se decide una sola vez con todos los tokens.
+    leading_space = _tokens_carry_leading_space(words)
+
     # Asignar speaker a cada palabra
     word_speakers: list[str] = [
         speakers[_find_speaker_index(word.start, speakers, tolerance_sec)].speaker
@@ -134,7 +158,7 @@ def align_speakers(
 
         if speaker_changed:
             group_words = words[group_start:i]
-            text = "".join(w.word for w in group_words).strip()
+            text = _join_words(group_words, leading_space)
             result.append(
                 AttributedSegment(
                     speaker=word_speakers[group_start],
