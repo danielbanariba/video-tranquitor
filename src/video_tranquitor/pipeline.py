@@ -84,184 +84,188 @@ async def run_pipeline(file_path: str, config: PipelineConfig) -> PipelineResult
 
     print(f"\nIniciando pipeline para: {base_name}")
 
-    # -------------------------------------------------------------------------
-    # Etapa 1: Preprocesamiento de audio
-    # -------------------------------------------------------------------------
-    stage_start = time.time()
-    print(
-        "Extrayendo y optimizando audio del video..."
-        if is_video
-        else "Optimizando audio..."
-    )
+    try:
+        # -------------------------------------------------------------------------
+        # Etapa 1: Preprocesamiento de audio
+        # -------------------------------------------------------------------------
+        stage_start = time.time()
+        print(
+            "Extrayendo y optimizando audio del video..."
+            if is_video
+            else "Optimizando audio..."
+        )
 
-    preprocess_ok = preprocess_audio(
-        file_path,
-        temp_wav_path,
-        config.audio_filter,
-        config.target_sample_rate,
-    )
-
-    if not preprocess_ok:
-        raise RuntimeError(f"No se pudo preprocesar el archivo: {file_path}")
-
-    stages_run.append("preprocess")
-    _stage_log("preprocess", stage_start)
-
-    audio_duration_sec = get_audio_duration(temp_wav_path)
-    print(f"Duración total del audio: {format_time(audio_duration_sec)}")
-
-    # -------------------------------------------------------------------------
-    # Etapa 2: Transcripción
-    # -------------------------------------------------------------------------
-    stage_start = time.time()
-    print("Transcribiendo audio...")
-
-    raw_transcriptions: list[Transcription]
-    whisper_result: WhisperResult | None = None
-
-    if config.transcriber == "openai":
-        raw_transcriptions = await asyncio.to_thread(
-            transcribe_openai,
+        preprocess_ok = preprocess_audio(
+            file_path,
             temp_wav_path,
-            config.openai_api_key,
-            config.transcribe_model,
-            config.transcription_prompt,
+            config.audio_filter,
             config.target_sample_rate,
-            config.language,
         )
-    elif config.transcriber == "whisperx":
-        whisper_result = await asyncio.to_thread(
-            transcribe_whisperx, temp_wav_path, config, config.whisperx_model
-        )
-        raw_transcriptions = whisperx_result_to_transcriptions(whisper_result)
-    elif config.transcriber == "ensemble":
-        ensemble_result = await transcribe_ensemble(temp_wav_path, config)
-        whisper_result = ensemble_result.whisper_result
-        raw_transcriptions = ensemble_result.arbitrated
-    else:
-        # config.transcriber == "local"
-        whisper_result = await asyncio.to_thread(
-            transcribe_local, temp_wav_path, config
-        )
-        raw_transcriptions = whisper_result_to_transcriptions(whisper_result)
 
-    stages_run.append("transcribe")
-    _stage_log("transcribe", stage_start)
+        if not preprocess_ok:
+            raise RuntimeError(f"No se pudo preprocesar el archivo: {file_path}")
 
-    # Mapear Transcription[] -> AttributedSegment[] (sin hablantes aún)
-    transcription: list[AttributedSegment] = [
-        AttributedSegment(
-            speaker=None,
-            text=t.texto,
-            start=_time_string_to_seconds(t.inicio),
-            end=_time_string_to_seconds(t.fin),
-        )
-        for t in raw_transcriptions
-    ]
+        stages_run.append("preprocess")
+        _stage_log("preprocess", stage_start)
 
-    # -------------------------------------------------------------------------
-    # Etapa 3: Diarización
-    # -------------------------------------------------------------------------
-    if config.enable_diarization:
-        if (
-            whisper_result is None
-            or not whisper_result.segments
-            or not whisper_result.segments[0].words
-        ):
-            print(
-                "⚠  Diarización requiere timestamps a nivel de palabra. Omitiendo diarización."
+        audio_duration_sec = get_audio_duration(temp_wav_path)
+        print(f"Duración total del audio: {format_time(audio_duration_sec)}")
+
+        # -------------------------------------------------------------------------
+        # Etapa 2: Transcripción
+        # -------------------------------------------------------------------------
+        stage_start = time.time()
+        print("Transcribiendo audio...")
+
+        raw_transcriptions: list[Transcription]
+        whisper_result: WhisperResult | None = None
+
+        if config.transcriber == "openai":
+            raw_transcriptions = await asyncio.to_thread(
+                transcribe_openai,
+                temp_wav_path,
+                config.openai_api_key,
+                config.transcribe_model,
+                config.transcription_prompt,
+                config.target_sample_rate,
+                config.language,
             )
+        elif config.transcriber == "whisperx":
+            whisper_result = await asyncio.to_thread(
+                transcribe_whisperx, temp_wav_path, config, config.whisperx_model
+            )
+            raw_transcriptions = whisperx_result_to_transcriptions(whisper_result)
+        elif config.transcriber == "ensemble":
+            ensemble_result = await transcribe_ensemble(temp_wav_path, config)
+            whisper_result = ensemble_result.whisper_result
+            raw_transcriptions = ensemble_result.arbitrated
         else:
-            stage_start = time.time()
-            print("Ejecutando diarización de hablantes...")
-
-            diarization_segments = await asyncio.to_thread(
-                diarize, temp_wav_path, config
+            # config.transcriber == "local"
+            whisper_result = await asyncio.to_thread(
+                transcribe_local, temp_wav_path, config
             )
+            raw_transcriptions = whisper_result_to_transcriptions(whisper_result)
 
-            if diarization_segments:
-                transcription = align_speakers(whisper_result, diarization_segments)
+        stages_run.append("transcribe")
+        _stage_log("transcribe", stage_start)
 
-            stages_run.append("diarization")
-            _stage_log("diarization", stage_start)
-
-    # -------------------------------------------------------------------------
-    # Etapa 4: Análisis
-    # -------------------------------------------------------------------------
-    analysis: AnalysisResult | None = None
-    if config.enable_analysis:
-        stage_start = time.time()
-        print("Analizando transcripción con IA...")
-        analysis = await analyze_transcription(transcription, config)
-        if analysis:
-            stages_run.append("analysis")
-            _stage_log("analysis", stage_start)
-        else:
-            print("  Análisis omitido (falló o no disponible). El pipeline continúa.")
-
-    # -------------------------------------------------------------------------
-    # Etapa 5: Escritura TOON
-    # -------------------------------------------------------------------------
-    toon_output_path: str | None = None
-    if config.enable_toon:
-        stage_start = time.time()
-        toon_path = os.path.join(config.output_dir, f"{base_name}_transcription.toon")
-        write_toon(raw_transcriptions, toon_path)
-        toon_output_path = toon_path
-        stages_run.append("toon")
-        _stage_log("toon", stage_start)
-        print(f"Archivo TOON guardado en: {toon_path}")
-
-    # -------------------------------------------------------------------------
-    # Etapa 6: Obsidian
-    # -------------------------------------------------------------------------
-    obsidian_output_path: str | None = None
-    if config.enable_obsidian:
-        stage_start = time.time()
-        print("Generando nota en Obsidian...")
-        try:
-            partial_result = PipelineResult(
-                input_file=file_path,
-                wav_path=temp_wav_path,
-                transcription=transcription,
-                analysis=analysis,
-                toon_output_path=toon_output_path,
-                obsidian_output_path=None,
-                duration_ms=(time.time() - pipeline_start) * 1000,
-                audio_duration_sec=audio_duration_sec,
-                stages_run=list(stages_run),
-                whisper_result=whisper_result,
+        # Mapear Transcription[] -> AttributedSegment[] (sin hablantes aún)
+        transcription: list[AttributedSegment] = [
+            AttributedSegment(
+                speaker=None,
+                text=t.texto,
+                start=_time_string_to_seconds(t.inicio),
+                end=_time_string_to_seconds(t.fin),
             )
-            obsidian_output_path = str(write_obsidian_note(partial_result, config))
-            stages_run.append("obsidian")
-            _stage_log("obsidian", stage_start)
-            print(f"Nota de Obsidian guardada en: {obsidian_output_path}")
-        except Exception as exc:
-            message = str(exc)
-            if message.startswith("E_VAULT_NOT_FOUND"):
-                print(f"  {message}")
+            for t in raw_transcriptions
+        ]
+
+        # -------------------------------------------------------------------------
+        # Etapa 3: Diarización
+        # -------------------------------------------------------------------------
+        if config.enable_diarization:
+            if (
+                whisper_result is None
+                or not whisper_result.segments
+                or not whisper_result.segments[0].words
+            ):
+                print(
+                    "⚠  Diarización requiere timestamps a nivel de palabra. Omitiendo diarización."
+                )
             else:
-                logger.error("Error al escribir nota de Obsidian: %s", message)
-            print("  Nota de Obsidian omitida. El pipeline continúa.")
+                stage_start = time.time()
+                print("Ejecutando diarización de hablantes...")
 
-    # Limpieza de archivos temporales
-    if os.path.exists(temp_wav_path):
-        os.unlink(temp_wav_path)
+                diarization_segments = await asyncio.to_thread(
+                    diarize, temp_wav_path, config
+                )
 
-    duration_ms = (time.time() - pipeline_start) * 1000
-    print(
-        f"\nPipeline finalizado para: {base_name} ({duration_ms / 1000:.2f}s total)"
-    )
+                if diarization_segments:
+                    transcription = align_speakers(whisper_result, diarization_segments)
 
-    return PipelineResult(
-        input_file=file_path,
-        wav_path=temp_wav_path,
-        transcription=transcription,
-        analysis=analysis,
-        toon_output_path=toon_output_path,
-        obsidian_output_path=obsidian_output_path,
-        duration_ms=duration_ms,
-        audio_duration_sec=audio_duration_sec,
-        stages_run=stages_run,
-        whisper_result=whisper_result,
-    )
+                stages_run.append("diarization")
+                _stage_log("diarization", stage_start)
+
+        # -------------------------------------------------------------------------
+        # Etapa 4: Análisis
+        # -------------------------------------------------------------------------
+        analysis: AnalysisResult | None = None
+        if config.enable_analysis:
+            stage_start = time.time()
+            print("Analizando transcripción con IA...")
+            analysis = await analyze_transcription(transcription, config)
+            if analysis:
+                stages_run.append("analysis")
+                _stage_log("analysis", stage_start)
+            else:
+                print("  Análisis omitido (falló o no disponible). El pipeline continúa.")
+
+        # -------------------------------------------------------------------------
+        # Etapa 5: Escritura TOON
+        # -------------------------------------------------------------------------
+        toon_output_path: str | None = None
+        if config.enable_toon:
+            stage_start = time.time()
+            toon_path = os.path.join(config.output_dir, f"{base_name}_transcription.toon")
+            write_toon(raw_transcriptions, toon_path)
+            toon_output_path = toon_path
+            stages_run.append("toon")
+            _stage_log("toon", stage_start)
+            print(f"Archivo TOON guardado en: {toon_path}")
+
+        # -------------------------------------------------------------------------
+        # Etapa 6: Obsidian
+        # -------------------------------------------------------------------------
+        obsidian_output_path: str | None = None
+        if config.enable_obsidian:
+            stage_start = time.time()
+            print("Generando nota en Obsidian...")
+            try:
+                partial_result = PipelineResult(
+                    input_file=file_path,
+                    wav_path=temp_wav_path,
+                    transcription=transcription,
+                    analysis=analysis,
+                    toon_output_path=toon_output_path,
+                    obsidian_output_path=None,
+                    duration_ms=(time.time() - pipeline_start) * 1000,
+                    audio_duration_sec=audio_duration_sec,
+                    stages_run=list(stages_run),
+                    whisper_result=whisper_result,
+                )
+                obsidian_output_path = str(write_obsidian_note(partial_result, config))
+                stages_run.append("obsidian")
+                _stage_log("obsidian", stage_start)
+                print(f"Nota de Obsidian guardada en: {obsidian_output_path}")
+            except Exception as exc:
+                message = str(exc)
+                if message.startswith("E_VAULT_NOT_FOUND"):
+                    print(f"  {message}")
+                else:
+                    logger.error("Error al escribir nota de Obsidian: %s", message)
+                print("  Nota de Obsidian omitida. El pipeline continúa.")
+
+        duration_ms = (time.time() - pipeline_start) * 1000
+        print(
+            f"\nPipeline finalizado para: {base_name} ({duration_ms / 1000:.2f}s total)"
+        )
+
+        return PipelineResult(
+            input_file=file_path,
+            wav_path=temp_wav_path,
+            transcription=transcription,
+            analysis=analysis,
+            toon_output_path=toon_output_path,
+            obsidian_output_path=obsidian_output_path,
+            duration_ms=duration_ms,
+            audio_duration_sec=audio_duration_sec,
+            stages_run=stages_run,
+            whisper_result=whisper_result,
+        )
+
+    finally:
+        # El WAV temporal se borra pase lo que pase. Cuando el ensemble murió
+        # por falta de VRAM quedó un archivo de casi 100 MB colgado en output/,
+        # y el watcher lo ignora por el prefijo temp_, así que nadie lo limpiaba.
+        if os.path.exists(temp_wav_path):
+            os.unlink(temp_wav_path)
