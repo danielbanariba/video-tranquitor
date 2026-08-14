@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+from video_tranquitor.gpu import release_gpu_memory
 from video_tranquitor.types import DiarizationSegment, PipelineConfig
 
 logger = logging.getLogger(__name__)
@@ -139,23 +140,30 @@ def diarize(audio_path: str, config: PipelineConfig) -> list[DiarizationSegment]
     pipeline = _load_pipeline(config.diarization_model, config.hf_token)
     pipeline.to(device)
 
-    # Precargar en memoria evita el decoder de torchcodec (roto con ffmpeg 8+).
-    audio_input = _load_audio_in_memory(audio_path) or audio_path
+    try:
+        # Precargar en memoria evita el decoder de torchcodec (roto con ffmpeg 8+).
+        audio_input = _load_audio_in_memory(audio_path) or audio_path
 
-    annotation = _resolve_annotation(
-        pipeline(audio_input),
-        config.diarization_exclusive,
-    )
-
-    segments: list[DiarizationSegment] = []
-    for turn, _, speaker in annotation.itertracks(yield_label=True):
-        segments.append(
-            DiarizationSegment(
-                speaker=speaker,
-                start=round(float(turn.start), 3),
-                end=round(float(turn.end), 3),
-            )
+        annotation = _resolve_annotation(
+            pipeline(audio_input),
+            config.diarization_exclusive,
         )
+
+        segments: list[DiarizationSegment] = []
+        for turn, _, speaker in annotation.itertracks(yield_label=True):
+            segments.append(
+                DiarizationSegment(
+                    speaker=speaker,
+                    start=round(float(turn.start), 3),
+                    end=round(float(turn.end), 3),
+                )
+            )
+    finally:
+        # pyannote es la única etapa que corre dentro del proceso principal
+        # (whisper.cpp es subproceso y WhisperX corre en el pool). Sin esto su
+        # pico de VRAM queda reservado mientras viva el watcher.
+        del pipeline
+        release_gpu_memory()
 
     segments.sort(key=lambda s: s.start)
     return segments

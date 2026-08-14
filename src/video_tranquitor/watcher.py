@@ -13,6 +13,7 @@ from typing import Callable, Coroutine, Any
 from watchdog.events import FileCreatedEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
+from video_tranquitor.gpu import release_gpu_memory
 from video_tranquitor.pipeline import AUDIO_EXTENSIONS, VIDEO_EXTENSIONS
 from video_tranquitor.types import PipelineConfig
 
@@ -109,6 +110,11 @@ def start_watcher(
                     await on_file(path)
                 except Exception as exc:  # noqa: BLE001
                     print(f"Error al procesar {path}: {exc}")
+                finally:
+                    # El daemon vive entre archivos: si no se libera acá, la VRAM
+                    # reservada por el archivo anterior deja la GPU secuestrada.
+                    # Va en finally porque un fallo también deja memoria colgada.
+                    release_gpu_memory()
             except queue.Empty:
                 await asyncio.sleep(0.1)
 
