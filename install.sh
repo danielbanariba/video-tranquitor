@@ -259,10 +259,11 @@ setup_venv() {
   case "$PROFILE" in
     nvidia)
       log "Perfil nvidia: instalando torch+CUDA, WhisperX y pyannote (~3 GB de descarga)..."
+      # torch primero y desde el índice de CUDA: las ruedas con GPU no están en
+      # PyPI, así que resolverlo junto al extra [gpu] traería la build de CPU.
       uv pip install --python venv/bin/python \
-        torch torchaudio --index-url https://download.pytorch.org/whl/cu124
-      uv pip install --python venv/bin/python \
-        whisperx "pyannote.audio>=4.0.4"
+        torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+      uv pip install --python venv/bin/python -e ".[gpu]"
       ;;
     vulkan|cpu)
       dim "Perfil $PROFILE: no se instalan torch/whisperx/pyannote (no hacen falta)"

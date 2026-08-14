@@ -6,7 +6,9 @@ build-backend = "setuptools.build_meta"
 name = "video-tranquitor"
 version = "2.0.0"
 description = "Pipeline de transcripción y análisis de audio/video"
-# El techo es real, no defensivo: PyTorch no publica ruedas para 3.14.
+# El techo lo impone whisperx (`Requires-Python: <3.14,>=3.10`), no PyTorch:
+# torch declara `>=3.9.0` sin límite superior. Verificado con importlib.metadata
+# sobre el venv real.
 requires-python = ">=3.12,<3.14"
 
 # Lo mínimo para correr con TRANSCRIBER=local (whisper.cpp por subprocess) y

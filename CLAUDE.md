@@ -27,13 +27,18 @@ The CLI also accepts a positional path: `python -m video_tranquitor path/to/file
 
 ## Prerequisites
 
-- Python 3.12 venv at `./venv`. **3.14 will not work** — PyTorch publishes no wheels for it, which is
-  why `requires-python` is capped at `<3.14`.
+- Python 3.12 venv at `./venv`. **3.14 will not work** — `whisperx` declares `Requires-Python:
+  <3.14,>=3.10`, which is why `requires-python` is capped. (Not PyTorch: `torch` declares `>=3.9.0`
+  with no upper bound. The older claim that PyTorch was the blocker was wrong.)
   ```
   uv venv --python 3.12 venv
-  source venv/bin/activate
-  uv pip install -e ".[gpu,dev]"
+  # torch first, from the CUDA index — the GPU wheels are not on PyPI
+  uv pip install --python venv/bin/python torch torchaudio \
+    --index-url https://download.pytorch.org/whl/cu128
+  uv pip install --python venv/bin/python -e ".[gpu,dev]"
   ```
+  Note `uv venv` does **not** seed `pip` into the venv — there is no `venv/bin/pip`, only the
+  system-level `pip3`. Always drive installs through `uv pip install --python venv/bin/python`.
   Dependencies are declared as extras because they are genuinely optional:
   - core (always): `pydantic`, `python-dotenv`, `watchdog`, `click` — enough for `TRANSCRIBER=local`
     with diarization off. The analyzer shells out to the `codex`/`claude` CLIs, which are not Python deps.
