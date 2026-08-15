@@ -33,29 +33,38 @@ def preprocess_audio(
     ]
     filter_args = ["-af", audio_filter] if audio_filter else []
 
-    def _run(extra_args: list[str]) -> bool:
-        cmd = base_command + extra_args + ["-y", output_path]
-        result = subprocess.run(cmd, capture_output=True)
-        return result.returncode == 0
+    def _run(extra_args: list[str]) -> tuple[bool, str]:
+        """Corre ffmpeg y devuelve (éxito, motivo).
 
-    try:
-        if _run(filter_args):
+        El stderr se devuelve en vez de descartarse: esta etapa tarda minutos, y
+        cuando falla el motivo real lo tiene ffmpeg, no el returncode.
+        """
+        cmd = base_command + extra_args + ["-y", output_path]
+        try:
+            result = subprocess.run(cmd, capture_output=True)
+        except OSError as error:  # ffmpeg ausente o no ejecutable
+            return False, str(error)
+        if result.returncode == 0:
+            return True, ""
+        stderr = (result.stderr or b"").decode("utf-8", errors="replace").strip()
+        return False, stderr[-800:] or f"ffmpeg terminó con código {result.returncode}"
+
+    ok, motivo = _run(filter_args)
+    if ok:
+        return True
+
+    if filter_args:
+        logger.error(
+            "ffmpeg falló con los filtros (%s), reintentando sin ellos. ffmpeg dijo: %s",
+            audio_filter,
+            motivo,
+        )
+        ok, motivo = _run([])
+        if ok:
             return True
-        raise subprocess.CalledProcessError(1, "ffmpeg")
-    except Exception as error:
-        if filter_args:
-            logger.error(
-                "Error al preparar el audio con filtros, reintentando sin filtros: %s",
-                error,
-            )
-            try:
-                if _run([]):
-                    return True
-            except Exception as fallback_error:
-                logger.error("Error al preparar el audio: %s", fallback_error)
-                return False
-        logger.error("Error al preparar el audio: %s", error)
-        return False
+
+    logger.error("Error al preparar el audio. ffmpeg dijo: %s", motivo)
+    return False
 
 
 def get_audio_duration(path: str) -> float:
@@ -74,7 +83,14 @@ def get_audio_duration(path: str) -> float:
             check=True,
         )
         return float(result.stdout.strip())
-    except Exception:
+    except Exception as error:
+        # Devolver 0.0 en silencio hacía que el pipeline reportara "00:00:00" y
+        # siguiera como si nada, escondiendo un ffprobe roto o un WAV corrupto.
+        logger.warning(
+            "ffprobe no pudo leer la duración de %s (%s). Se reporta 0 y el pipeline sigue.",
+            path,
+            error,
+        )
         return 0.0
 
 

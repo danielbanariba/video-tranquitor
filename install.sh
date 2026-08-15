@@ -361,8 +361,15 @@ write_env() {
 
   log "Generando .env para perfil: $PROFILE"
 
-  local has_codex="false"
-  command -v codex >/dev/null 2>&1 && has_codex="true"
+  # El análisis corre por Codex CLI o por Claude Code CLI, indistintamente.
+  # Detectar solo codex dejaba el análisis apagado a quien tuviera claude.
+  local analysis_provider=""
+  command -v codex >/dev/null 2>&1 && analysis_provider="codex"
+  # claude gana si están los dos: no consume cuota de la API de OpenAI.
+  command -v claude >/dev/null 2>&1 && analysis_provider="claude"
+
+  local has_analysis="false"
+  [ -n "$analysis_provider" ] && has_analysis="true"
 
   case "$PROFILE" in
     nvidia)
@@ -372,20 +379,26 @@ write_env() {
 # Generado por install.sh el $(date '+%Y-%m-%d %H:%M:%S')
 # ============================================================================
 
-# Ensemble: corre whisper.cpp turbo + WhisperX en paralelo y arbitra con Codex
-TRANSCRIBER=ensemble
+# WhisperX solo. El modo ensemble existe pero se midió y NO conviene: el árbitro
+# reproduce a WhisperX en todos los chunks y, donde se desvía, rompe los nombres
+# técnicos (Mongo-dbcrm-hn salió como "Mongo guión bajo DB CRM guión bajo HN").
+TRANSCRIBER=whisperx
 WHISPER_CPP_PATH=$WHISPER_BIN
 WHISPER_MODEL_PATH=$MODEL_FILE
 WHISPERX_MODEL=large-v3
 
-# Diarización de hablantes (requiere HF_TOKEN — conseguilo en
-# https://huggingface.co/settings/tokens y aceptá el modelo
-# pyannote/speaker-diarization-3.1)
+# Diarización de hablantes. Requiere HF_TOKEN: conseguilo en
+# https://huggingface.co/settings/tokens y aceptá las condiciones en
+# https://huggingface.co/pyannote/speaker-diarization-community-1
 HF_TOKEN=
 ENABLE_DIARIZATION=false
 
-# Análisis con IA: requiere Codex CLI instalada y autenticada
-ENABLE_ANALYSIS=$has_codex
+# Análisis con IA: usa el CLI de Codex o el de Claude Code, el que esté.
+ENABLE_ANALYSIS=$has_analysis
+ANALYSIS_PROVIDER=${analysis_provider:-codex}
+# Varias pasadas en paralelo que después se unen. El modelo no es determinista:
+# con 1 sola pasada se midió que pierde datos que otra corrida sí captura.
+ANALYSIS_PASSES=3
 
 # Salida
 ENABLE_TOON=true
@@ -403,8 +416,8 @@ TARGET_SAMPLE_RATE=16000
 # Solo necesaria si cambiás TRANSCRIBER=openai
 # OPENAI_API_KEY=
 EOF
-      [ "$has_codex" = "false" ] && \
-        warn "Codex CLI no detectado — análisis quedó OFF. Instalalo y poné ENABLE_ANALYSIS=true."
+      [ "$has_analysis" = "false" ] && \
+        warn "Ni Codex CLI ni Claude Code detectados — análisis quedó OFF. Instalá alguno y poné ENABLE_ANALYSIS=true."
       ;;
     vulkan|cpu)
       cat > .env <<EOF
@@ -470,8 +483,10 @@ main() {
     nvidia)
       echo "Notas del perfil nvidia:"
       echo "  - Para diarización: editá HF_TOKEN en .env y poné ENABLE_DIARIZATION=true"
-      [ "$(command -v codex >/dev/null 2>&1 && echo y || echo n)" = "n" ] && \
-        echo "  - Para análisis con IA: instalá el Codex CLI y poné ENABLE_ANALYSIS=true"
+      if ! command -v codex >/dev/null 2>&1 && ! command -v claude >/dev/null 2>&1; then
+        echo "  - Para análisis con IA: instalá el CLI de Codex o el de Claude Code"
+        echo "    y poné ENABLE_ANALYSIS=true"
+      fi
       ;;
     vulkan)
       echo "Nota: si la velocidad no te convence, probá un modelo más chico:"
