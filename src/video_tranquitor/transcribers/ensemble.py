@@ -256,15 +256,33 @@ async def transcribe_ensemble(
             arbitration_used=False,
         )
 
-    raw_items: list[dict] = arbitration_response["transcripciones"]
-    arbitrated_transcriptions = [
-        Transcription(inicio=item["inicio"], fin=item["fin"], texto=item["texto"])
-        for item in raw_items
-    ]
-
-    validated = _validate_and_snap_timestamps(
-        arbitrated_transcriptions, turbo_chunks, whisperx_chunks
-    )
+    # Esto corre FUERA del retry de call_llm_with_schema: si un item viene sin
+    # alguna clave, el KeyError se llevaba puesto el run entero después de haber
+    # transcrito el audio. Se degrada igual que cuando la arbitración devuelve
+    # None, que es la misma situación desde el punto de vista del resultado.
+    try:
+        raw_items: list[dict] = arbitration_response["transcripciones"]
+        arbitrated_transcriptions = [
+            Transcription(inicio=item["inicio"], fin=item["fin"], texto=item["texto"])
+            for item in raw_items
+        ]
+        validated = _validate_and_snap_timestamps(
+            arbitrated_transcriptions, turbo_chunks, whisperx_chunks
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        logger.error(
+            "E_ARBITRATION_FAILED: respuesta de arbitración malformada (%s). "
+            "Usando WhisperX como fallback.",
+            error,
+        )
+        print("  Ensemble: arbitración malformada. Usando WhisperX como fallback.")
+        return EnsembleResult(
+            whisper_result=whisperx_settled,  # type: ignore[arg-type]
+            arbitrated=whisperx_chunks,
+            turbo=turbo_chunks,
+            whisperx=whisperx_chunks,
+            arbitration_used=False,
+        )
 
     return EnsembleResult(
         whisper_result=whisperx_settled,  # type: ignore[arg-type]
