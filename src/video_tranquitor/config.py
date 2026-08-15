@@ -25,9 +25,13 @@ DEFAULT_AUDIO_FILTER = "highpass=f=80, lowpass=f=12000, afftdn=nf=-25"
 # community-1 reemplaza a speaker-diarization-3.1 (requiere pyannote.audio >= 4.0).
 DEFAULT_DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
 
-# Unión de los niveles que aceptan ambos CLIs. Codex soporta `minimal` pero no
-# `max`; Claude Code soporta `max` pero no `minimal`.
-VALID_EFFORT_LEVELS = ("minimal", "low", "medium", "high", "xhigh", "max")
+# Cada CLI acepta su propio juego de niveles: Codex tiene `minimal` y no `max`,
+# Claude Code tiene `max` y no `minimal`. Verificado contra `codex --help` y
+# `claude --help` de las versiones instaladas.
+EFFORT_LEVELS_BY_PROVIDER = {
+    "codex": ("minimal", "low", "medium", "high", "xhigh"),
+    "claude": ("low", "medium", "high", "xhigh", "max"),
+}
 
 
 def load_config() -> PipelineConfig:
@@ -70,12 +74,17 @@ def load_config() -> PipelineConfig:
             f"ANALYSIS_PASSES={analysis_passes} no es válido: tiene que ser 1 o más."
         )
 
-    # `minimal` solo existe en Codex; `max` solo en Claude Code.
+    # Validar contra el proveedor elegido y no contra la unión: `minimal` solo
+    # existe en Codex y `max` solo en Claude Code, así que aceptar la unión
+    # dejaba pasar valores que el CLI iba a rechazar recién en runtime, después
+    # de haber transcrito el audio entero.
     analysis_effort = os.environ.get("ANALYSIS_EFFORT", "").lower()
-    if analysis_effort and analysis_effort not in VALID_EFFORT_LEVELS:
+    niveles = EFFORT_LEVELS_BY_PROVIDER[analysis_provider]
+    if analysis_effort and analysis_effort not in niveles:
         raise ValueError(
-            f"ANALYSIS_EFFORT='{analysis_effort}' no es válido. "
-            f"Valores aceptados: {', '.join(VALID_EFFORT_LEVELS)}"
+            f"ANALYSIS_EFFORT='{analysis_effort}' no es válido para "
+            f"ANALYSIS_PROVIDER={analysis_provider}. "
+            f"Valores aceptados: {', '.join(niveles)}"
         )
 
     # OPENAI_API_KEY solo es obligatoria si TRANSCRIBER=openai.

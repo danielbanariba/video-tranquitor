@@ -29,7 +29,7 @@ El script detecta tu hardware automáticamente y configura el perfil ideal. Es *
 
 | Perfil | Cuándo se elige | Qué instala | Qué configura |
 |--------|-----------------|-------------|---------------|
-| `nvidia` | `nvidia-smi` detecta una GPU NVIDIA | torch+CUDA, WhisperX, pyannote.audio + whisper.cpp con CUDA | `TRANSCRIBER=ensemble` (whisper.cpp turbo + WhisperX large-v3, arbitrados con Codex) |
+| `nvidia` | `nvidia-smi` detecta una GPU NVIDIA | torch+CUDA, WhisperX, pyannote.audio + whisper.cpp con CUDA | `TRANSCRIBER=whisperx` (WhisperX large-v3, con diarización disponible) |
 | `vulkan` | GPU Intel Iris Xe / AMD con Vulkan disponible | whisper.cpp con backend Vulkan, **sin** torch | `TRANSCRIBER=local` (100% local, sin nube) |
 | `cpu` | Sin GPU usable | whisper.cpp CPU+AVX2, **sin** torch | `TRANSCRIBER=local` (100% local, sin nube) |
 
@@ -161,18 +161,38 @@ transcripciones[3]{inicio,fin,texto}:
 
 Toda la configuración vive en `.env`. El instalador lo genera con valores razonables. Los más interesantes:
 
-| Variable | Default (modo local) | Para qué sirve |
-|----------|----------------------|----------------|
-| `TRANSCRIBER` | `local` | `local` (whisper.cpp) o `openai` (API en la nube — requiere `OPENAI_API_KEY`). |
-| `WHISPER_CPP_PATH` | autogenerado | Ruta al binario `whisper-cli`. |
-| `WHISPER_MODEL_PATH` | autogenerado | Ruta al `.bin` del modelo. |
+Hay una plantilla completa y comentada en [`.env.example`](./.env.example). Las variables principales:
+
+| Variable | Default | Para qué sirve |
+|----------|---------|----------------|
+| `TRANSCRIBER` | `local` | `local` (whisper.cpp), `whisperx` (recomendada), `openai` (API paga) o `ensemble`. |
+| `WHISPER_CPP_PATH` | autogenerado | Ruta al binario `whisper-cli`. Solo para `local` y `ensemble`. |
+| `WHISPER_MODEL_PATH` | autogenerado | Ruta al `.bin` del modelo. Solo para `local` y `ensemble`. |
+| `WHISPERX_MODEL` | `large-v3` | Modelo de WhisperX. |
 | `WATCH_DIR` | `./Audios` | Carpeta que monitorea el daemon. |
 | `OUTPUT_DIR` | `./output` | Donde se escriben las transcripciones. |
 | `LANGUAGE` | `es` | Idioma del audio. |
 | `ENABLE_TOON` | `true` | Escribir el archivo `.toon`. |
-| `ENABLE_DIARIZATION` | `false` | Identificar quién habla (ver abajo). |
-| `ENABLE_ANALYSIS` | `false` | Análisis con IA — extrae requerimientos/accionables (ver abajo). |
-| `ENABLE_OBSIDIAN` | `false` | Generar nota Markdown en un vault de Obsidian. |
+| `ENABLE_DIARIZATION` | `false` | Identificar quién habla (ver abajo). Requiere `HF_TOKEN`. |
+| `ENABLE_ANALYSIS` | `true` | Análisis con IA — extrae requerimientos/accionables (ver abajo). |
+| `ENABLE_OBSIDIAN` | `true` | Generar nota Markdown en un vault de Obsidian. |
+| `ANALYSIS_PROVIDER` | `codex` | `codex` (CLI de Codex) o `claude` (CLI de Claude Code). |
+| `ANALYSIS_PASSES` | `1` | Pasadas del análisis que después se unen. Ver abajo. |
+
+### Por qué conviene `TRANSCRIBER=whisperx`
+
+El modo `ensemble` corre whisper.cpp y WhisperX en paralelo y arbitra con un LLM. Suena mejor y no lo
+es. Medido sobre una reunión completa: de 8 chunks arbitrados, 8 se parecían a WhisperX y ninguno a
+whisper.cpp, o sea que el árbitro reproduce WhisperX con 195 s de trabajo que WhisperX solo hace en
+22 s. Y donde sí se desvía, empeora: `Mongo-dbcrm-hn` salió como `Mongo guión bajo DB CRM guión bajo
+HN`, inservible para pegar en una consulta.
+
+### Por qué subir `ANALYSIS_PASSES`
+
+El modelo no es determinista. Con la misma transcripción de entrada, una corrida captura el nombre
+exacto de una base de datos y la siguiente lo omite. Con 3 pasadas que después se unen, sobre la misma
+reunión: requerimientos 6 → 10, decisiones 6 → 8, y el día del que trataba toda la reunión pasó de 0
+a 10 menciones. Cuesta unos 130 s.
 
 ## Cambiar el modelo
 
@@ -196,7 +216,7 @@ Después editá `WHISPER_MODEL_PATH` en `.env` apuntando al nuevo `.bin`.
 Identifica quién dice qué (`SPEAKER_00`, `SPEAKER_01`, etc.). **Solo recomendado con perfil `nvidia`** — en CPU es inutilizablemente lento.
 
 1. Si te instalaste con `--profile=nvidia`, ya tenés torch+pyannote listos.
-2. Conseguí un token en [Hugging Face](https://huggingface.co/settings/tokens) y aceptá los términos del modelo [`pyannote/speaker-diarization-3.1`](https://huggingface.co/pyannote/speaker-diarization-3.1).
+2. Aceptá las condiciones del modelo [`pyannote/speaker-diarization-community-1`](https://huggingface.co/pyannote/speaker-diarization-community-1) y generá un token de tipo **Read** en [Hugging Face](https://huggingface.co/settings/tokens). El orden importa: sin aceptar las condiciones, el token no sirve y la descarga falla con 401.
 3. En `.env`: `HF_TOKEN=hf_...` y `ENABLE_DIARIZATION=true`.
 
 ### Análisis con IA

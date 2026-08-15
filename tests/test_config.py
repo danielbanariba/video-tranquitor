@@ -292,3 +292,49 @@ class TestLoadConfig:
             cfg = load_config()
 
         assert cfg.enable_diarization is False
+
+
+class TestValidacionDeEsfuerzoPorProveedor:
+    """El nivel de esfuerzo se valida contra el proveedor, no contra la unión."""
+
+    # Se reusan los helpers de TestLoadConfig sin heredar de ella: heredar
+    # haría que pytest re-corra sus 13 tests dentro de esta clase.
+    _set_minimal_valid_env = TestLoadConfig._set_minimal_valid_env
+    _clear_env = TestLoadConfig._clear_env
+    _load = TestLoadConfig._load
+
+    # Antes se validaba contra la unión de niveles, así que `max` con provider
+    # codex pasaba la validación y el CLI lo rechazaba recién en runtime, ya
+    # con el audio transcrito y varios minutos gastados.
+    def test_max_no_es_valido_para_codex(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._set_minimal_valid_env(monkeypatch)
+        monkeypatch.setenv("ANALYSIS_PROVIDER", "codex")
+        monkeypatch.setenv("ANALYSIS_EFFORT", "max")
+
+        with pytest.raises(ValueError, match="no es válido para ANALYSIS_PROVIDER=codex"):
+            self._load()
+
+    def test_minimal_no_es_valido_para_claude(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._set_minimal_valid_env(monkeypatch)
+        monkeypatch.setenv("ANALYSIS_PROVIDER", "claude")
+        monkeypatch.setenv("ANALYSIS_EFFORT", "minimal")
+
+        with pytest.raises(ValueError, match="no es válido para ANALYSIS_PROVIDER=claude"):
+            self._load()
+
+    def test_nivel_compartido_sirve_en_ambos(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for provider in ("codex", "claude"):
+            self._set_minimal_valid_env(monkeypatch)
+            monkeypatch.setenv("ANALYSIS_PROVIDER", provider)
+            monkeypatch.setenv("ANALYSIS_EFFORT", "high")
+
+            assert self._load().analysis_effort == "high"
+
+    def test_analysis_passes_tiene_que_ser_al_menos_uno(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._set_minimal_valid_env(monkeypatch)
+        monkeypatch.setenv("ANALYSIS_PASSES", "0")
+
+        with pytest.raises(ValueError, match="tiene que ser 1 o más"):
+            self._load()
