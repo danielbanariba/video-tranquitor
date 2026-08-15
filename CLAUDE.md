@@ -79,6 +79,12 @@ Tuning:
 - `ANALYSIS_MODEL` — model for the selected provider. Empty (default) uses that provider's own
   default. Codex: `gpt-5.6-sol` etc. (or whatever `~/.codex/config.toml` says). Claude: `opus`,
   `sonnet`, `fable`, or a full name like `claude-opus-5`
+- `ANALYSIS_PASSES` (default `1`) — how many independent analysis runs to launch in parallel before
+  merging them with a final consolidation call. The model is **not deterministic**: with byte-identical
+  input, one run captures a database name and the next omits it entirely. Measured on a 17:38 meeting,
+  1 pass vs 3: requirements 6→10, decisions 6→8, analysis text 5883→9486 chars, and the day the whole
+  meeting was about went from 0 to 10 mentions. Costs ~130 s per meeting. Use `1` when speed matters
+  more than completeness
 - `ANALYSIS_EFFORT` — reasoning effort. Codex accepts `minimal|low|medium|high|xhigh`
   (passed as `-c model_reasoning_effort=`); Claude accepts `low|medium|high|xhigh|max`
   (passed as `--effort`). Empty (default) uses the provider default
@@ -104,6 +110,7 @@ Entry point: `src/video_tranquitor/__main__.py` → `cli.py` (Click). Two modes:
    - `_resolve_annotation` handles both output shapes (4.x returns a `DiarizeOutput` with `speaker_diarization` / `exclusive_speaker_diarization`; 3.x returns the `Annotation` directly).
 4. **Align** (`aligner.align_speakers`) — binary-search-based assignment of each Whisper word to the diarization segment that best matches its `start` (with a 500 ms tolerance window), then groups consecutive same-speaker words into `AttributedSegment` paragraphs.
 5. **Analyze** (`analyzer.analyze_transcription`, optional) — calls `llm_client.call_llm_with_schema`, which dispatches to `codex_client` or `claude_client` per `config.analysis_provider`, to produce `AnalysisResult { resumen, requerimientos[], accionables[], decisiones[], diagrama }`. Failures are non-fatal — pipeline continues.
+   With `ANALYSIS_PASSES > 1` it runs N passes concurrently via `asyncio.gather` and merges them with `_build_consolidation_prompt`, whose governing rule is **union, not intersection**: a finding present in only one pass still makes the cut. Degradation is deliberate — some passes failing means the survivors get consolidated; a single survivor is returned as-is without a consolidation call; a failed consolidation falls back to the first pass rather than discarding the work.
 6. **Write** — `writers/toon_writer.py` (custom inline TOON encoder, byte-compatible with `@toon-format/toon` v2 from the legacy TS) and `writers/obsidian_writer.py` (Markdown with YAML frontmatter, one note per audio in `OBSIDIAN_VAULT_PATH`). Vault-not-found is a soft error.
 
 Cleanup: temp WAVs and chunk dirs are deleted in `finally`/post-stage blocks.
