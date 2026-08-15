@@ -35,6 +35,9 @@ class PipelineConfig(BaseModel):
     analysis_model: str = ""
     analysis_effort: str = ""
     analysis_passes: int = 1
+    # 5 es el default de WhisperX. Subirlo explora más hipótesis por segmento:
+    # más lento, potencialmente más preciso.
+    whisperx_beam_size: int = 5
     target_sample_rate: int
 
 

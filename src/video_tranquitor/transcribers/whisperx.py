@@ -72,7 +72,24 @@ def transcribe_whisperx(
     compute_type = "float16" if device == "cuda" else "int8"
     batch_size = 16 if device == "cuda" else 4
 
-    print(f"WhisperX — device: {device}, compute: {compute_type}, modelo: {model_size}")
+    # NO se pasa `initial_prompt`, y no por olvido: se midió y EMPEORA.
+    # config.transcription_prompt ("Mantiene nombres propios, numeros y siglas
+    # tal como se escuchan") parece hecho a medida para este problema, pero
+    # sobre 600 s del audio real, comparado contra no pasarlo:
+    #   palabras 880 -> 735 | mayúsculas 152 -> 136 | puntuación 233 -> 211
+    #   Honduras 2 -> 1 | Mongo 4 -> 3 | Power Query 1 -> 0
+    # initial_prompt condiciona el decodificador hacia el REGISTRO del prompt, y
+    # uno instructivo empuja a texto más corto y formal, comiéndose contenido
+    # real. Ese campo lo usa solamente el transcriptor de OpenAI, donde sí ayuda.
+    asr_options = {
+        "beam_size": config.whisperx_beam_size,
+        "best_of": config.whisperx_beam_size,
+    }
+
+    print(
+        f"WhisperX — device: {device}, compute: {compute_type}, modelo: {model_size}, "
+        f"beam: {config.whisperx_beam_size}"
+    )
 
     # Etapa 1: Transcripción con VAD integrado
     print("  [whisperx] Cargando modelo...")
@@ -81,6 +98,7 @@ def transcribe_whisperx(
         device,
         compute_type=compute_type,
         language=config.language,
+        asr_options=asr_options,
     )
 
     print("  [whisperx] Cargando audio...")

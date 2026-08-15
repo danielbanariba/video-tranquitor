@@ -137,5 +137,6 @@ def load_config() -> PipelineConfig:
         analysis_model=os.environ.get("ANALYSIS_MODEL", ""),
         analysis_effort=analysis_effort,
         analysis_passes=analysis_passes,
+        whisperx_beam_size=int(os.environ.get("WHISPERX_BEAM_SIZE", "5")),
         target_sample_rate=target_sample_rate,
     )
