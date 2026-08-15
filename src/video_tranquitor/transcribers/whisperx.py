@@ -5,7 +5,7 @@ from __future__ import annotations
 import gc
 import logging
 
-from video_tranquitor.preprocessor import format_time
+from video_tranquitor.transcribers.chunking import result_to_transcriptions
 from video_tranquitor.types import (
     PipelineConfig,
     Transcription,
@@ -130,38 +130,4 @@ def whisperx_result_to_transcriptions(
 
     Porta la lógica de ``whisperxResultToTranscriptions`` de TypeScript.
     """
-    transcriptions: list[Transcription] = []
-
-    if not result.segments:
-        return transcriptions
-
-    current_start = 0
-    current_end = chunk_seconds
-    current_texts: list[str] = []
-
-    for seg in result.segments:
-        if seg.start >= current_end:
-            if current_texts:
-                transcriptions.append(
-                    Transcription(
-                        inicio=format_time(current_start),
-                        fin=format_time(current_end),
-                        texto=" ".join(current_texts).strip(),
-                    )
-                )
-            current_start = int(seg.start / chunk_seconds) * chunk_seconds
-            current_end = current_start + chunk_seconds
-            current_texts = []
-        current_texts.append(seg.text.strip())
-
-    if current_texts:
-        final_end = min(current_end, result.segments[-1].end)
-        transcriptions.append(
-            Transcription(
-                inicio=format_time(current_start),
-                fin=format_time(final_end),
-                texto=" ".join(current_texts).strip(),
-            )
-        )
-
-    return transcriptions
+    return result_to_transcriptions(result, chunk_seconds)

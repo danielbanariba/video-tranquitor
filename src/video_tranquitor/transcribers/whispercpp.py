@@ -7,7 +7,7 @@ import logging
 import os
 import subprocess
 
-from video_tranquitor.preprocessor import format_time
+from video_tranquitor.transcribers.chunking import result_to_transcriptions
 from video_tranquitor.types import (
     PipelineConfig,
     Transcription,
@@ -153,38 +153,4 @@ def whisper_result_to_transcriptions(
     Cada chunk contiene la concatenación de todos los textos de segmentos que
     caen dentro de esa ventana temporal.
     """
-    if not result.segments:
-        return []
-
-    transcriptions: list[Transcription] = []
-    chunk_start = result.segments[0].start
-    chunk_end = chunk_start + chunk_seconds
-    chunk_texts: list[str] = []
-
-    def _flush(actual_end: float) -> None:
-        text = " ".join(chunk_texts).strip()
-        if text:
-            transcriptions.append(
-                Transcription(
-                    inicio=format_time(chunk_start),
-                    fin=format_time(actual_end),
-                    texto=text,
-                )
-            )
-
-    for seg in result.segments:
-        if seg.start >= chunk_end:
-            _flush(min(seg.start, chunk_end))
-            chunk_start = chunk_end
-            # Avanzar límites hasta alcanzar el segmento
-            while seg.start >= chunk_start + chunk_seconds:
-                chunk_start += chunk_seconds
-            chunk_end = chunk_start + chunk_seconds
-            chunk_texts = []
-        chunk_texts.append(seg.text)
-
-    # Vaciar el último chunk
-    last_seg = result.segments[-1]
-    _flush(last_seg.end)
-
-    return transcriptions
+    return result_to_transcriptions(result, chunk_seconds)
