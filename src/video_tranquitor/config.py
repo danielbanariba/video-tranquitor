@@ -55,6 +55,21 @@ def load_config() -> PipelineConfig:
             "Valores aceptados: codex, claude"
         )
 
+    # Varias pasadas del análisis se unen al final. El modelo no es determinista:
+    # con la misma transcripción de entrada, una corrida captura datos que otra
+    # deja pasar. Más pasadas = más cobertura, a costa de tiempo y cuota.
+    analysis_passes_raw = os.environ.get("ANALYSIS_PASSES", "1")
+    try:
+        analysis_passes = int(analysis_passes_raw)
+    except ValueError:
+        raise ValueError(
+            f"ANALYSIS_PASSES='{analysis_passes_raw}' no es un número entero."
+        ) from None
+    if analysis_passes < 1:
+        raise ValueError(
+            f"ANALYSIS_PASSES={analysis_passes} no es válido: tiene que ser 1 o más."
+        )
+
     # `minimal` solo existe en Codex; `max` solo en Claude Code.
     analysis_effort = os.environ.get("ANALYSIS_EFFORT", "").lower()
     if analysis_effort and analysis_effort not in VALID_EFFORT_LEVELS:
@@ -121,5 +136,6 @@ def load_config() -> PipelineConfig:
         analysis_provider=analysis_provider,  # type: ignore[arg-type]
         analysis_model=os.environ.get("ANALYSIS_MODEL", ""),
         analysis_effort=analysis_effort,
+        analysis_passes=analysis_passes,
         target_sample_rate=target_sample_rate,
     )

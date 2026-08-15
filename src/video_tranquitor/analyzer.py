@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+import logging
+
 from video_tranquitor.llm_client import call_llm_with_schema
 from video_tranquitor.types import (
     Accionable,
@@ -10,6 +14,8 @@ from video_tranquitor.types import (
     PipelineConfig,
     Requirement,
 )
+
+logger = logging.getLogger(__name__)
 
 _ANALYSIS_SCHEMA = {
     "type": "object",
@@ -146,14 +152,45 @@ def _validate_analysis_result(parsed: object) -> AnalysisResult:
     )
 
 
-async def analyze_transcription(
-    transcription: list[AttributedSegment],
-    config: PipelineConfig,
-) -> AnalysisResult | None:
-    """Analiza una transcripción usando Codex y devuelve el resultado estructurado."""
-    transcription_text = _build_transcription_text(transcription)
-    prompt = _build_prompt(transcription_text)
+def _build_consolidation_prompt(analisis: list[AnalysisResult]) -> str:
+    """Arma el prompt que consolida varias pasadas sobre la misma reunión."""
+    partes = []
+    for i, a in enumerate(analisis, 1):
+        partes.append(
+            f"=== ANÁLISIS {i} ===\n"
+            + json.dumps(a.model_dump(), ensure_ascii=False, indent=2)
+        )
+    cuerpo = "\n\n".join(partes)
 
+    return (
+        "Sos un experto en ingeniería de requerimientos. Abajo hay "
+        f"{len(analisis)} análisis independientes de LA MISMA reunión, hechos por "
+        "el mismo modelo en corridas separadas. Difieren porque el modelo no es "
+        "determinista: cada corrida captura detalles que las otras dejan pasar.\n\n"
+        "Tu tarea es CONSOLIDARLOS en un único análisis que no pierda nada.\n\n"
+        f"{cuerpo}\n\n"
+        "Reglas de consolidación:\n"
+        "- UNIÓN, no intersección: si un requerimiento, accionable o decisión "
+        "aparece en una sola de las versiones, va igual al resultado. Que solo "
+        "una corrida lo haya visto no lo hace menos real.\n"
+        "- Fusioná los duplicados: si dos versiones describen lo mismo con "
+        "distintas palabras, dejá UNA sola entrada y quedate con la redacción "
+        "MÁS ESPECÍFICA, la que conserva más datos concretos.\n"
+        "- Identificadores técnicos: si una versión escribe el nombre exacto "
+        '(por ejemplo "mongo-dbcrm-hn") y otra lo generaliza ("la base del CRM"), '
+        "gana SIEMPRE la exacta.\n"
+        "- Nombres de personas: si alguna versión identificó el nombre real "
+        "detrás de una etiqueta SPEAKER_XX, usá el nombre en todas.\n"
+        "- Renumerá los requerimientos de forma correlativa desde REQ-001.\n"
+        "- No inventes nada que no esté en ninguna de las versiones.\n"
+        "- Para el resumen y el diagrama, elegí la versión más completa y "
+        "enriquecela con los datos concretos que aparezcan en las otras.\n\n"
+        "Devolvé el resultado con la misma estructura JSON que los análisis de "
+        "entrada."
+    )
+
+
+async def _una_pasada(prompt: str, config: PipelineConfig) -> AnalysisResult | None:
     return await call_llm_with_schema(
         prompt=prompt,
         schema=_ANALYSIS_SCHEMA,
@@ -165,3 +202,43 @@ async def analyze_transcription(
         timeout_sec=10 * 60,
         error_code="E_CODEX_FAILED",
     )
+
+
+async def analyze_transcription(
+    transcription: list[AttributedSegment],
+    config: PipelineConfig,
+) -> AnalysisResult | None:
+    """Analiza una transcripción y devuelve el resultado estructurado.
+
+    Con ``config.analysis_passes`` mayor a 1 corre varias pasadas en paralelo y
+    las une con una pasada final de consolidación. El modelo no es determinista:
+    se midió que con la misma transcripción de entrada una corrida captura el
+    nombre exacto de una base de datos y la siguiente lo omite. Unir varias
+    recupera lo que cada una deja pasar.
+
+    Degradación: si algunas pasadas fallan se consolidan las que sobrevivieron;
+    si sobrevive una sola se devuelve tal cual; si falla la consolidación se
+    devuelve la primera pasada en vez de perder todo el trabajo.
+    """
+    prompt = _build_prompt(_build_transcription_text(transcription))
+    pasadas = max(1, config.analysis_passes)
+
+    if pasadas == 1:
+        return await _una_pasada(prompt, config)
+
+    print(f"  Análisis: {pasadas} pasadas en paralelo, después se consolidan...")
+    resultados = await asyncio.gather(*(_una_pasada(prompt, config) for _ in range(pasadas)))
+    validos = [r for r in resultados if r is not None]
+
+    if not validos:
+        return None
+    if len(validos) == 1:
+        print("  Análisis: solo una pasada devolvió resultado, no hay nada que unir.")
+        return validos[0]
+
+    print(f"  Análisis: consolidando {len(validos)} pasadas...")
+    consolidado = await _una_pasada(_build_consolidation_prompt(validos), config)
+    if consolidado is None:
+        logger.warning("La consolidación falló; se usa la primera pasada.")
+        return validos[0]
+    return consolidado

@@ -34,6 +34,7 @@ class PipelineConfig(BaseModel):
     analysis_provider: Literal["codex", "claude"] = "codex"
     analysis_model: str = ""
     analysis_effort: str = ""
+    analysis_passes: int = 1
     target_sample_rate: int
 
 

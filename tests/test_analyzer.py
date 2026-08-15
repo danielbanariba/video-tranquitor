@@ -2,12 +2,49 @@
 
 from __future__ import annotations
 
+import pytest
+
+from video_tranquitor import analyzer as analyzer_mod
 from video_tranquitor.analyzer import (
     _build_prompt,
     _build_transcription_text,
     _validate_analysis_result,
+    analyze_transcription,
 )
-from video_tranquitor.types import AttributedSegment
+from video_tranquitor.types import (
+    AnalysisResult,
+    AttributedSegment,
+    PipelineConfig,
+    Requirement,
+)
+
+
+def _segmento() -> AttributedSegment:
+    return AttributedSegment(speaker="SPEAKER_00", text="hola", start=0.0, end=1.0)
+
+
+def _config(passes: int) -> PipelineConfig:
+    return PipelineConfig(
+        watch_dir=".",
+        output_dir="./output",
+        transcriber="whisperx",
+        whisperx_model="large-v3",
+        whisper_cpp_path="",
+        whisper_model_path="",
+        enable_diarization=False,
+        enable_analysis=True,
+        enable_obsidian=False,
+        enable_toon=False,
+        obsidian_vault_path="",
+        hf_token="",
+        openai_api_key="",
+        audio_filter="",
+        language="es",
+        transcription_prompt="",
+        transcribe_model="gpt-4o-transcribe",
+        analysis_passes=passes,
+        target_sample_rate=16000,
+    )
 
 
 def base_parsed(**overrides: object) -> dict[str, object]:
@@ -111,3 +148,102 @@ class TestBuildPrompt:
         prompt = _build_prompt("SPEAKER_00: hola.")
 
         assert "SPEAKER_00: hola." in prompt
+
+
+# ---------------------------------------------------------------------
+# Análisis multi-pasada
+# ---------------------------------------------------------------------
+
+
+def _resultado(resumen: str, n_req: int = 1) -> AnalysisResult:
+    return AnalysisResult(
+        resumen=resumen,
+        requerimientos=[
+            Requirement(id=f"REQ-{i:03d}", descripcion=f"req {i}", prioridad="alta")
+            for i in range(1, n_req + 1)
+        ],
+        accionables=[],
+        decisiones=[],
+        diagrama="",
+    )
+
+
+class TestAnalisisMultiPasada:
+    async def test_una_sola_pasada_no_consolida(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        llamadas: list[str] = []
+
+        async def fake_llm(*, prompt: str, **_kw):
+            llamadas.append(prompt)
+            return _resultado("único")
+
+        monkeypatch.setattr(analyzer_mod, "call_llm_with_schema", fake_llm)
+        config = _config(passes=1)
+
+        resultado = await analyze_transcription([_segmento()], config)
+
+        assert resultado is not None and resultado.resumen == "único"
+        assert len(llamadas) == 1, "con una pasada no debe haber consolidación"
+
+    async def test_varias_pasadas_mas_consolidacion(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        prompts: list[str] = []
+
+        async def fake_llm(*, prompt: str, **_kw):
+            prompts.append(prompt)
+            # La última llamada es la de consolidación
+            return _resultado(f"pasada {len(prompts)}")
+
+        monkeypatch.setattr(analyzer_mod, "call_llm_with_schema", fake_llm)
+        config = _config(passes=3)
+
+        resultado = await analyze_transcription([_segmento()], config)
+
+        assert len(prompts) == 4, "3 pasadas + 1 consolidación"
+        assert resultado is not None and resultado.resumen == "pasada 4"
+        assert "consolid" in prompts[-1].lower()
+
+    # Si solo sobrevive una pasada no hay nada que unir: se devuelve tal cual.
+    async def test_con_una_sola_pasada_valida_no_consolida(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        llamadas = {"n": 0}
+
+        async def fake_llm(**_kw):
+            llamadas["n"] += 1
+            return _resultado("sobreviviente") if llamadas["n"] == 1 else None
+
+        monkeypatch.setattr(analyzer_mod, "call_llm_with_schema", fake_llm)
+
+        resultado = await analyze_transcription([_segmento()], _config(passes=3))
+
+        assert resultado is not None and resultado.resumen == "sobreviviente"
+        assert llamadas["n"] == 3, "no debe haber cuarta llamada de consolidación"
+
+    async def test_si_fallan_todas_devuelve_none(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def fake_llm(**_kw):
+            return None
+
+        monkeypatch.setattr(analyzer_mod, "call_llm_with_schema", fake_llm)
+
+        assert await analyze_transcription([_segmento()], _config(passes=3)) is None
+
+    # Si la consolidación falla, no se pierde el trabajo: cae a la primera pasada.
+    async def test_si_falla_la_consolidacion_cae_a_la_primera_pasada(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        llamadas = {"n": 0}
+
+        async def fake_llm(**_kw):
+            llamadas["n"] += 1
+            return None if llamadas["n"] == 3 else _resultado(f"p{llamadas['n']}")
+
+        monkeypatch.setattr(analyzer_mod, "call_llm_with_schema", fake_llm)
+
+        resultado = await analyze_transcription([_segmento()], _config(passes=2))
+
+        assert resultado is not None and resultado.resumen == "p1"
