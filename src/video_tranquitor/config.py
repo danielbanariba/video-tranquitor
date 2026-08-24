@@ -34,6 +34,19 @@ EFFORT_LEVELS_BY_PROVIDER = {
 }
 
 
+def _env(name: str, default: str) -> str:
+    """Lee una variable de entorno tratando el string vacío como ausente.
+
+    `os.environ.get(name, default)` solo devuelve el default cuando la clave NO
+    existe. Una variable definida pero vacía devuelve "" y pisa el default. Eso
+    no es teórico: `LANGUAGE` es la variable estándar de GNU gettext y varios
+    sistemas la exportan vacía, así que WhisperX recibía `language=''` y moría
+    con "'' is not a valid language code" recién después de preprocesar el audio
+    entero. Usá esta función para toda variable donde el vacío no significa nada.
+    """
+    return os.environ.get(name) or default
+
+
 def load_config() -> PipelineConfig:
     """Lee el archivo .env y construye un PipelineConfig validado.
 
@@ -42,7 +55,7 @@ def load_config() -> PipelineConfig:
     """
     load_dotenv()
 
-    transcriber = os.environ.get("TRANSCRIBER", "local")
+    transcriber = _env("TRANSCRIBER", "local")
     if transcriber not in ("local", "openai", "whisperx", "ensemble"):
         raise ValueError(
             f"TRANSCRIBER='{transcriber}' no es válido. "
@@ -52,7 +65,7 @@ def load_config() -> PipelineConfig:
     enable_diarization = os.environ.get("ENABLE_DIARIZATION", "").lower() == "true"
     enable_analysis = os.environ.get("ENABLE_ANALYSIS", "true").lower() != "false"
 
-    analysis_provider = os.environ.get("ANALYSIS_PROVIDER", "codex").lower()
+    analysis_provider = _env("ANALYSIS_PROVIDER", "codex").lower()
     if analysis_provider not in ("codex", "claude"):
         raise ValueError(
             f"ANALYSIS_PROVIDER='{analysis_provider}' no es válido. "
@@ -62,7 +75,7 @@ def load_config() -> PipelineConfig:
     # Varias pasadas del análisis se unen al final. El modelo no es determinista:
     # con la misma transcripción de entrada, una corrida captura datos que otra
     # deja pasar. Más pasadas = más cobertura, a costa de tiempo y cuota.
-    analysis_passes_raw = os.environ.get("ANALYSIS_PASSES", "1")
+    analysis_passes_raw = _env("ANALYSIS_PASSES", "1")
     try:
         analysis_passes = int(analysis_passes_raw)
     except ValueError:
@@ -119,8 +132,8 @@ def load_config() -> PipelineConfig:
     )
 
     return PipelineConfig(
-        watch_dir=os.environ.get("WATCH_DIR", "./Audios"),
-        output_dir=os.environ.get("OUTPUT_DIR", "./output"),
+        watch_dir=_env("WATCH_DIR", "./Audios"),
+        output_dir=_env("OUTPUT_DIR", "./output"),
         transcriber=transcriber,  # type: ignore[arg-type]
         whisper_cpp_path=os.environ.get("WHISPER_CPP_PATH", ""),
         whisper_model_path=os.environ.get("WHISPER_MODEL_PATH", ""),
@@ -132,13 +145,13 @@ def load_config() -> PipelineConfig:
         hf_token=os.environ.get("HF_TOKEN", ""),
         openai_api_key=os.environ.get("OPENAI_API_KEY", ""),
         audio_filter=os.environ.get("AUDIO_FILTER", DEFAULT_AUDIO_FILTER),
-        language=os.environ.get("LANGUAGE", "es"),
+        language=_env("LANGUAGE", "es"),
         transcription_prompt=os.environ.get(
             "TRANSCRIPTION_PROMPT", DEFAULT_TRANSCRIPTION_PROMPT
         ),
-        transcribe_model=os.environ.get("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-transcribe"),
-        whisperx_model=os.environ.get("WHISPERX_MODEL", "large-v3"),
-        diarization_model=os.environ.get("DIARIZATION_MODEL", DEFAULT_DIARIZATION_MODEL),
+        transcribe_model=_env("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-transcribe"),
+        whisperx_model=_env("WHISPERX_MODEL", "large-v3"),
+        diarization_model=_env("DIARIZATION_MODEL", DEFAULT_DIARIZATION_MODEL),
         diarization_exclusive=(
             os.environ.get("DIARIZATION_EXCLUSIVE", "true").lower() != "false"
         ),
@@ -146,6 +159,6 @@ def load_config() -> PipelineConfig:
         analysis_model=os.environ.get("ANALYSIS_MODEL", ""),
         analysis_effort=analysis_effort,
         analysis_passes=analysis_passes,
-        whisperx_beam_size=int(os.environ.get("WHISPERX_BEAM_SIZE", "5")),
+        whisperx_beam_size=int(_env("WHISPERX_BEAM_SIZE", "5")),
         target_sample_rate=target_sample_rate,
     )

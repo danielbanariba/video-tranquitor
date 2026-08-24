@@ -338,3 +338,37 @@ class TestValidacionDeEsfuerzoPorProveedor:
 
         with pytest.raises(ValueError, match="tiene que ser 1 o más"):
             self._load()
+
+
+class TestVariablesVaciasCaenAlDefault:
+    """Una variable definida pero vacía tiene que comportarse como ausente."""
+
+    _clear_env = TestLoadConfig._clear_env
+    _set_minimal_valid_env = TestLoadConfig._set_minimal_valid_env
+    _load = TestLoadConfig._load
+
+    # LANGUAGE colisiona con la variable estándar de GNU gettext, que muchos
+    # sistemas exportan vacía. Una variable definida-pero-vacía no dispara el
+    # default de os.environ.get, así que WhisperX recibía language='' y moría.
+    def test_language_vacio_cae_al_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._set_minimal_valid_env(monkeypatch)
+        monkeypatch.setenv("LANGUAGE", "")
+
+        assert self._load().language == "es"
+
+    def test_beam_size_vacio_cae_al_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._set_minimal_valid_env(monkeypatch)
+        monkeypatch.setenv("WHISPERX_BEAM_SIZE", "")
+
+        assert self._load().whisperx_beam_size == 5
+
+    def test_directorios_vacios_caen_al_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._set_minimal_valid_env(monkeypatch)
+        monkeypatch.setenv("WATCH_DIR", "")
+        monkeypatch.setenv("OUTPUT_DIR", "")
+
+        cfg = self._load()
+        assert cfg.watch_dir == "./Audios"
+        assert cfg.output_dir == "./output"

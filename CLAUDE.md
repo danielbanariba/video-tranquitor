@@ -69,6 +69,12 @@ Tuning:
 - `WATCH_DIR` (default `./Audios`), `OUTPUT_DIR` (default `./output`)
 - `OBSIDIAN_VAULT_PATH` (defaults to a hardcoded local path in `config.py` — override in your env)
 - `LANGUAGE` (default `es`), `TRANSCRIPTION_PROMPT`, `AUDIO_FILTER`
+  - Ojo: `LANGUAGE` colisiona con la variable estándar de GNU gettext, que muchos sistemas
+    exportan **vacía**. Por eso `config.py` lee las variables con el helper `_env`, que trata
+    el string vacío como ausente — `os.environ.get(k, default)` no lo hace y devolvía `''`,
+    matando a WhisperX con `'' is not a valid language code` recién después de preprocesar el
+    audio entero. Toda variable nueva cuyo vacío no signifique nada va por `_env`, no por
+    `os.environ.get`. Excepción deliberada: `AUDIO_FILTER` vacío SÍ significa "sin filtros".
 - `OPENAI_TRANSCRIBE_MODEL` (default `gpt-4o-transcribe`), `WHISPERX_MODEL` (default `large-v3`)
 - `DIARIZATION_MODEL` (default `pyannote/speaker-diarization-community-1`)
 - `DIARIZATION_EXCLUSIVE` (default `true`) — use the non-overlapping `exclusive_speaker_diarization`
