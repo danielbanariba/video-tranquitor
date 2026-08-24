@@ -29,6 +29,7 @@ class TestLoadConfig:
             "OBSIDIAN_VAULT_PATH",
             "AUDIO_FILTER",
             "LANGUAGE",
+            "AUDIO_LANGUAGE",
             "TRANSCRIPTION_PROMPT",
             "OPENAI_TRANSCRIBE_MODEL",
             "TARGET_SAMPLE_RATE",
@@ -41,12 +42,18 @@ class TestLoadConfig:
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key")
         monkeypatch.setenv("TRANSCRIBER", "openai")
 
-    def _load(self) -> object:
-        """Importa load_config evitando que dotenv lea .env del disco."""
-        # Parcheamos load_dotenv para que no lea archivos .env
+    def _load(self, dotenv: dict[str, str] | None = None) -> object:
+        """Importa load_config evitando que dotenv lea .env del disco.
+
+        `dotenv` simula el contenido del archivo .env, que la detección de
+        LANGUAGE obsoleta lee aparte del entorno.
+        """
         from unittest.mock import patch
 
-        with patch("video_tranquitor.config.load_dotenv"):
+        with (
+            patch("video_tranquitor.config.load_dotenv"),
+            patch("video_tranquitor.config.dotenv_values", return_value=dotenv or {}),
+        ):
             from video_tranquitor.config import load_config
 
             return load_config()
@@ -157,7 +164,7 @@ class TestLoadConfig:
         monkeypatch.setenv("WATCH_DIR", "/videos")
         monkeypatch.setenv("OUTPUT_DIR", "/out")
         monkeypatch.setenv("OBSIDIAN_VAULT_PATH", "/vault/notes")
-        monkeypatch.setenv("LANGUAGE", "en")
+        monkeypatch.setenv("AUDIO_LANGUAGE", "en")
         monkeypatch.setenv("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-audio-preview")
         monkeypatch.setenv("TARGET_SAMPLE_RATE", "44100")
         monkeypatch.setenv("ENABLE_ANALYSIS", "true")
@@ -347,12 +354,11 @@ class TestVariablesVaciasCaenAlDefault:
     _set_minimal_valid_env = TestLoadConfig._set_minimal_valid_env
     _load = TestLoadConfig._load
 
-    # LANGUAGE colisiona con la variable estándar de GNU gettext, que muchos
-    # sistemas exportan vacía. Una variable definida-pero-vacía no dispara el
-    # default de os.environ.get, así que WhisperX recibía language='' y moría.
-    def test_language_vacio_cae_al_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_audio_language_vacio_cae_al_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         self._set_minimal_valid_env(monkeypatch)
-        monkeypatch.setenv("LANGUAGE", "")
+        monkeypatch.setenv("AUDIO_LANGUAGE", "")
 
         assert self._load().language == "es"
 
@@ -372,3 +378,58 @@ class TestVariablesVaciasCaenAlDefault:
         cfg = self._load()
         assert cfg.watch_dir == "./Audios"
         assert cfg.output_dir == "./output"
+
+
+class TestAudioLanguageNoLeeLanguage:
+    """`LANGUAGE` es de GNU gettext; la config del audio va por AUDIO_LANGUAGE."""
+
+    _clear_env = TestLoadConfig._clear_env
+    _set_minimal_valid_env = TestLoadConfig._set_minimal_valid_env
+    _load = TestLoadConfig._load
+
+    def test_usa_audio_language(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._set_minimal_valid_env(monkeypatch)
+        monkeypatch.setenv("AUDIO_LANGUAGE", "en")
+
+        assert self._load().language == "en"
+
+    # El caso que rompía en producción al revés: el sistema exporta LANGUAGE con
+    # su semántica real de gettext (lista de locales por prioridad). Si la
+    # leyéramos, transcribiríamos en el idioma equivocado sin avisar.
+    def test_ignora_language_del_sistema(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._set_minimal_valid_env(monkeypatch)
+        monkeypatch.setenv("LANGUAGE", "en_US:en")
+
+        assert self._load().language == "es"
+
+    def test_audio_language_le_gana_a_language(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._set_minimal_valid_env(monkeypatch)
+        monkeypatch.setenv("LANGUAGE", "fr_FR:fr")
+        monkeypatch.setenv("AUDIO_LANGUAGE", "es")
+
+        assert self._load().language == "es"
+
+    # Renombrar en silencio deja a las instalaciones viejas transcribiendo en un
+    # idioma que nadie pidió. Si el .env todavía trae LANGUAGE, hay que decirlo.
+    def test_avisa_si_el_env_todavia_trae_language(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        self._set_minimal_valid_env(monkeypatch)
+
+        cfg = self._load(dotenv={"LANGUAGE": "en"})
+
+        assert cfg.language == "es"
+        assert "AUDIO_LANGUAGE" in capsys.readouterr().out
+
+    def test_no_avisa_si_el_env_ya_migro(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        self._set_minimal_valid_env(monkeypatch)
+        monkeypatch.setenv("AUDIO_LANGUAGE", "es")
+
+        self._load(dotenv={"AUDIO_LANGUAGE": "es"})
+
+        assert "LANGUAGE" not in capsys.readouterr().out
+

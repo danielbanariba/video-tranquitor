@@ -68,13 +68,20 @@ Toggles (default ON unless noted):
 Tuning:
 - `WATCH_DIR` (default `./Audios`), `OUTPUT_DIR` (default `./output`)
 - `OBSIDIAN_VAULT_PATH` (defaults to a hardcoded local path in `config.py` — override in your env)
-- `LANGUAGE` (default `es`), `TRANSCRIPTION_PROMPT`, `AUDIO_FILTER`
-  - Ojo: `LANGUAGE` colisiona con la variable estándar de GNU gettext, que muchos sistemas
-    exportan **vacía**. Por eso `config.py` lee las variables con el helper `_env`, que trata
-    el string vacío como ausente — `os.environ.get(k, default)` no lo hace y devolvía `''`,
-    matando a WhisperX con `'' is not a valid language code` recién después de preprocesar el
-    audio entero. Toda variable nueva cuyo vacío no signifique nada va por `_env`, no por
-    `os.environ.get`. Excepción deliberada: `AUDIO_FILTER` vacío SÍ significa "sin filtros".
+- `AUDIO_LANGUAGE` (default `es`), `TRANSCRIPTION_PROMPT`, `AUDIO_FILTER`
+  - Se llamaba `LANGUAGE` hasta que colisionó con la variable estándar de GNU gettext. `config.py`
+    ya **no la lee, ni como fallback**, y por dos motivos que se refuerzan: la semántica real de
+    gettext es una lista de locales por prioridad (`en_US:en`), no un código ISO — leerla
+    transcribiría en el idioma equivocado en silencio; y `load_dotenv` no pisa variables que ya
+    existen en el entorno, así que un `LANGUAGE=es` en el `.env` perdía contra lo que exportara el
+    sistema. Eso incluía el string vacío que mataba a WhisperX con `'' is not a valid language
+    code` recién después de preprocesar el audio entero. `_audio_language()` avisa por stdout si
+    encuentra `LANGUAGE` en el `.env`, para que un rename silencioso no deje instalaciones viejas
+    transcribiendo en un idioma que nadie eligió.
+  - La otra mitad del arreglo es el helper `_env`, que trata el string vacío como ausente:
+    `os.environ.get(k, default)` solo devuelve el default cuando la clave NO existe. Toda variable
+    nueva cuyo vacío no signifique nada va por `_env`, no por `os.environ.get`. Excepción
+    deliberada: `AUDIO_FILTER` vacío SÍ significa "sin filtros".
 - `OPENAI_TRANSCRIBE_MODEL` (default `gpt-4o-transcribe`), `WHISPERX_MODEL` (default `large-v3`)
 - `DIARIZATION_MODEL` (default `pyannote/speaker-diarization-community-1`)
 - `DIARIZATION_EXCLUSIVE` (default `true`) — use the non-overlapping `exclusive_speaker_diarization`

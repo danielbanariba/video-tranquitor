@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import os
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
 from video_tranquitor.types import PipelineConfig
+
+DEFAULT_LANGUAGE = "es"
 
 DEFAULT_TRANSCRIPTION_PROMPT = (
     "Transcribe en espanol con puntuacion clara. "
@@ -45,6 +47,40 @@ def _env(name: str, default: str) -> str:
     entero. Usá esta función para toda variable donde el vacío no significa nada.
     """
     return os.environ.get(name) or default
+
+
+def _audio_language() -> str:
+    """Idioma del audio, leído SOLO de `AUDIO_LANGUAGE`.
+
+    Antes esto era `LANGUAGE`, que es la variable estándar de GNU gettext. No la
+    leemos ni siquiera como fallback, por dos razones que se refuerzan:
+
+    1. Su semántica real es una lista de locales por prioridad (`en_US:en`), no
+       un código ISO. Leerla haría transcribir en el idioma equivocado en
+       silencio, que es peor que romper.
+    2. `load_dotenv` no pisa variables que ya existen en el entorno, así que un
+       `LANGUAGE=es` puesto en el .env perdía contra lo que exportara el sistema
+       — incluido el string vacío que ya había matado a WhisperX.
+
+    Renombrar es la única forma de sacarle el volante al sistema operativo.
+    """
+    valor = _env("AUDIO_LANGUAGE", "")
+    if valor:
+        return valor
+
+    # Un rename en silencio deja a las instalaciones viejas transcribiendo en un
+    # idioma que nadie eligió. Miramos el .env (no el entorno: ahí LANGUAGE es
+    # del sistema y no dice nada sobre la intención del usuario).
+    try:
+        if "LANGUAGE" in dotenv_values():
+            print(
+                "⚠ LANGUAGE quedó obsoleta: colisiona con la variable de GNU gettext. "
+                f"Renombrala a AUDIO_LANGUAGE en tu .env. Usando '{DEFAULT_LANGUAGE}'."
+            )
+    except OSError:
+        pass
+
+    return DEFAULT_LANGUAGE
 
 
 def load_config() -> PipelineConfig:
@@ -145,7 +181,7 @@ def load_config() -> PipelineConfig:
         hf_token=os.environ.get("HF_TOKEN", ""),
         openai_api_key=os.environ.get("OPENAI_API_KEY", ""),
         audio_filter=os.environ.get("AUDIO_FILTER", DEFAULT_AUDIO_FILTER),
-        language=_env("LANGUAGE", "es"),
+        language=_audio_language(),
         transcription_prompt=os.environ.get(
             "TRANSCRIPTION_PROMPT", DEFAULT_TRANSCRIPTION_PROMPT
         ),

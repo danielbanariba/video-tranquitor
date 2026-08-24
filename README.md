@@ -171,7 +171,7 @@ Hay una plantilla completa y comentada en [`.env.example`](./.env.example). Las 
 | `WHISPERX_MODEL` | `large-v3` | Modelo de WhisperX. |
 | `WATCH_DIR` | `./Audios` | Carpeta que monitorea el daemon. |
 | `OUTPUT_DIR` | `./output` | Donde se escriben las transcripciones. |
-| `LANGUAGE` | `es` | Idioma del audio. Si tu shell ya exporta `LANGUAGE` vacía (es la variable de GNU gettext), el default igual aplica. |
+| `AUDIO_LANGUAGE` | `es` | Idioma del audio (código ISO: `es`, `en`, ...). Se llamaba `LANGUAGE`, que colisionaba con la variable estándar de GNU gettext y hacía que el sistema le ganara a tu `.env`. Si tu `.env` todavía trae `LANGUAGE`, el arranque te avisa y usa el default. |
 | `ENABLE_TOON` | `true` | Escribir el archivo `.toon`. |
 | `ENABLE_DIARIZATION` | `false` | Identificar quién habla (ver abajo). Requiere `HF_TOKEN`. |
 | `ENABLE_ANALYSIS` | `true` | Análisis con IA — extrae requerimientos/accionables (ver abajo). |
