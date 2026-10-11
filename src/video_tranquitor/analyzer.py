@@ -200,7 +200,6 @@ async def _una_pasada(prompt: str, config: PipelineConfig) -> AnalysisResult | N
         effort=config.analysis_effort,
         max_retries=3,
         timeout_sec=10 * 60,
-        error_code="E_CODEX_FAILED",
     )
 
 
