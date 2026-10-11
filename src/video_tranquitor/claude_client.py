@@ -69,8 +69,14 @@ def _call_claude(
         raise TimeoutError(f"Claude timeout ({timeout_sec}s)")
 
     if proc.returncode != 0:
-        stderr_tail = (stderr or b"").decode("utf-8", errors="replace")[-500:]
-        raise RuntimeError(f"Claude exit {proc.returncode}: {stderr_tail}")
+        # Claude Code escribe algunos errores (límite de uso, login vencido) en stdout
+        # y deja stderr vacío: leer solo stderr dejaba el log en "Claude exit 1: ".
+        detail = "\n".join(
+            stream.decode("utf-8", errors="replace").strip()
+            for stream in (stderr or b"", stdout or b"")
+            if stream.strip()
+        )
+        raise RuntimeError(f"Claude exit {proc.returncode}: {detail[-500:]}")
 
     content = stdout.decode("utf-8", errors="replace").strip()
     if not content:
