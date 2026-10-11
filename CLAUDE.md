@@ -154,7 +154,7 @@ Cleanup: temp WAVs and chunk dirs are deleted in `finally`/post-stage blocks.
 - `lower_snake_case` for functions/variables, `UPPER_SNAKE_CASE` for constants, Pydantic `BaseModel` for all data.
 - Heavy imports (`torch`, `whisperx`, `pyannote.audio`, `openai`) are **always** lazy-imported inside the function that uses them — startup time and watcher mode depend on this. Don't promote them to module-level.
 - All user-facing text (logs, Obsidian notes, error messages) is Spanish. Match the existing tone (sentence-case, no emojis except the `⚠` already in use).
-- Commits: short, Spanish, sentence-case (e.g. "Mejorar transcripcion de audio"). Conventional-commit prefixes appear in recent history but the global rule is: no AI attribution / Co-Authored-By.
+- Commits: Gitmoji + Conventional Commits in Spanish, following `templates/commit-template.git.txt` (e.g. `:bug: fix(analyzer): mostrar el error que Claude escribe en stdout`). Pull requests follow `.github/pull_request_template.md`. No AI attribution / Co-Authored-By.
 - Error codes use an `E_*` prefix at the start of the message. Six exist: `E_WHISPER_NOT_FOUND`, `E_VAULT_NOT_FOUND`, `E_CODEX_FAILED`, `E_CLAUDE_FAILED`, `E_LLM_FAILED`, `E_ARBITRATION_FAILED`. They are **greppable log prefixes, not a dispatch mechanism** — exactly one drives control flow (`pipeline.py:242` matches `E_VAULT_NOT_FOUND` to downgrade a missing vault to a warning). Adding a new code buys you searchable logs and nothing else; if you want soft-fail behavior you have to write the branch yourself.
 - Don't commit `temp_*.wav`, `temp_chunks/`, `output/`, `.env`, `venv/`, or anything under `Audios/`.
 
