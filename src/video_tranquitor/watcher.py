@@ -94,14 +94,6 @@ def start_watcher(
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    def _shutdown(signum: int, frame: object) -> None:  # noqa: ARG001
-        print("\nDeteniendo watcher...")
-        observer.stop()
-        loop.call_soon_threadsafe(loop.stop)
-
-    signal.signal(signal.SIGTERM, _shutdown)
-    signal.signal(signal.SIGINT, _shutdown)
-
     async def _drain() -> None:
         while True:
             try:
@@ -119,8 +111,23 @@ def start_watcher(
             except queue.Empty:
                 await asyncio.sleep(0.1)
 
+    drain_task = loop.create_task(_drain())
+
+    def _shutdown(signum: int, frame: object) -> None:  # noqa: ARG001
+        print("\nDeteniendo watcher...")
+        observer.stop()
+        # Cancelar la tarea, no frenar el loop: _drain nunca termina por su
+        # cuenta, y con loop.stop() run_until_complete revienta con
+        # "Event loop stopped before Future completed".
+        loop.call_soon_threadsafe(drain_task.cancel)
+
+    signal.signal(signal.SIGTERM, _shutdown)
+    signal.signal(signal.SIGINT, _shutdown)
+
     try:
-        loop.run_until_complete(_drain())
+        loop.run_until_complete(drain_task)
+    except asyncio.CancelledError:
+        pass
     finally:
         observer.join()
         loop.close()
