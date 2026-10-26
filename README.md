@@ -11,6 +11,28 @@ Pipeline de transcripción de audio/video al español. Tira un archivo en una ca
 5. **Analiza** con IA (opcional): resumen, requerimientos, accionables, decisiones.
 6. **Escribe** la salida como TOON tabular y/o nota Markdown para Obsidian.
 
+```mermaid
+flowchart TD
+    daemon["Archivo nuevo en Audios/<br/>(make start)"] --> pre
+    cli["Un archivo puntual<br/>(make process FILE=...)"] --> pre
+    pre["Preproceso con ffmpeg<br/>WAV 16 kHz mono + filtros"] --> tr
+    tr["Transcripción<br/>local · whisperx<br/>openai · ensemble"]
+    tr --> toon[("Archivo .toon en output/<br/>texto con timestamps")]
+    tr --> dia["Diarización con pyannote<br/>quién habla y cuándo"]
+    dia --> ana["Análisis con IA<br/>Codex o Claude<br/>resumen, requerimientos,<br/>accionables y decisiones"]
+    ana --> obs[("Nota en Obsidian<br/>con hablantes y análisis")]
+
+    classDef opcional stroke-dasharray: 5 5
+    class toon,dia,ana,obs opcional
+```
+
+Las cajas punteadas se prenden y apagan desde el `.env` (`ENABLE_TOON`, `ENABLE_DIARIZATION`,
+`ENABLE_ANALYSIS`, `ENABLE_OBSIDIAN`); si una está apagada, el archivo pasa directo a la
+siguiente. El `.toon` guarda la transcripción tal cual sale del motor; los hablantes y el análisis
+solo llegan a la nota de Obsidian. La diarización necesita timestamps por palabra, así que no corre
+con `TRANSCRIBER=openai`. Si el análisis o la nota de Obsidian fallan, el pipeline termina igual
+con lo demás.
+
 Extensiones soportadas: `.mp4`, `.mkv`, `.avi`, `.mov`, `.ogg`, `.mp3`, `.wav`, `.m4a`, `.flac`.
 
 ## Instalación
